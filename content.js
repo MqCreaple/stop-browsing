@@ -83,7 +83,7 @@ function triggerPause(duration, siteLabel) {
     </div>
   `;
 
-  document.documentElement.appendChild(overlay);
+  document.body.appendChild(overlay);
 
   // ---- 阻止所有输入 ----
   const preventAll = (e) => { e.preventDefault(); e.stopPropagation(); };
@@ -105,10 +105,10 @@ function triggerPause(duration, siteLabel) {
   // ---- MutationObserver：防止被 DOM 移除 ----
   const observer = new MutationObserver(() => {
     if (!document.body.contains(overlay)) {
-      document.documentElement.appendChild(overlay);
+      document.body.appendChild(overlay);
     }
   });
-  observer.observe(document.documentElement, { childList: true, subtree: true });
+  observer.observe(document.body, { childList: true, subtree: true });
 
   // ---- 倒计时 ----
   const cd = document.getElementById('stop-browsing-countdown');

@@ -197,6 +197,7 @@ async function switchToTab(tabId) {
 
   try {
     const tab = await chrome.tabs.get(tabId);
+    console.log(`[别刷了] Switch to tab ${tab.title} (${tab.url})`)
     const cfg = await loadConfig();
     const matched = matchSite(tab.url, cfg);
     if (matched) {
@@ -231,17 +232,6 @@ chrome.tabs.onUpdated.addListener(async (tabId, change, tab) => {
     S.sessStart = Date.now();
     await checkAndTriggerPause(cfg);
   }
-});
-
-chrome.windows.onFocusChanged.addListener(async (windowId) => {
-  if (windowId === chrome.windows.WINDOW_ID_NONE) {
-    await stopSession();
-    return;
-  }
-  try {
-    const tabs = await chrome.tabs.query({ active: true, windowId });
-    if (tabs.length > 0) await switchToTab(tabs[0].id);
-  } catch { await stopSession(); }
 });
 
 // ============================================================

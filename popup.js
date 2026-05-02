@@ -33,9 +33,9 @@
   // 动态刷新调度
   // ============================================================
 
-  /** 设置刷新间隔：看视频时 1 秒，否则 5 秒 */
+  /** 设置刷新间隔：看视频时 1 秒，否则 20 秒 */
   function adjustInterval(onVideo) {
-    const desired = onVideo ? 1000 : 5000;
+    const desired = onVideo ? 1000 : 20000;
     if (_intervalMs === desired) return;  // 无需切换
     _intervalMs = desired;
     clearInterval(_timer);
@@ -43,7 +43,7 @@
 
     // 更新提示文字
     const hint = $('refresh-hint');
-    hint.textContent = onVideo ? '实时更新中' : '每 5 秒刷新';
+    hint.textContent = onVideo ? '实时更新中' : '每 20 秒刷新';
   }
 
   // ============================================================
@@ -180,14 +180,20 @@
     document.querySelectorAll('#site-list input[type="checkbox"]').forEach(cb => {
       sites.push({ id: cb.dataset.siteId, enabled: cb.checked });
     });
+    const nightStart = parseInt($('night-start').value);
+    const nightEnd = parseInt($('night-end').value);
+    const dayLimitMin = parseInt($('day-limit').value);
+    const nightLimitMin = parseInt($('night-limit').value);
+    const pauseDurationSec = parseInt($('pause-duration').value);
+    const pauseCooldown = parseInt($('pause-cooldown').value);
     return {
       sites,
-      nightStart:     parseInt($('night-start').value) || 23,
-      nightEnd:       parseInt($('night-end').value) || 6,
-      dayLimitMin:    parseInt($('day-limit').value) || 60,
-      nightLimitMin:  parseInt($('night-limit').value) || 20,
-      pauseDurationSec: parseInt($('pause-duration').value) || 30,
-      pauseCooldownMin: parseInt($('pause-cooldown').value) || 5,
+      nightStart:     (Number.isFinite(nightStart) && nightStart > 0 && nightStart <= 24) ? nightStart : 23,
+      nightEnd:       (Number.isFinite(nightEnd) && nightEnd >= 0 && nightEnd < 24) ? nightEnd : 6,
+      dayLimitMin:    Number.isFinite(dayLimitMin) ? dayLimitMin : 60,
+      nightLimitMin:  Number.isFinite(nightLimitMin) ? nightLimitMin : 20,
+      pauseDurationSec: (Number.isFinite(pauseDurationSec) && pauseDurationSec > 0) ? pauseDurationSec : 30,
+      pauseCooldownMin: Number.isFinite(pauseCooldown) ? pauseCooldown : 5,
     };
   }
 
