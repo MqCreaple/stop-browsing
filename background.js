@@ -33,7 +33,13 @@ const CFG_KEY = 'stop_browsing_config';
 const DATA_KEY = 'stop_browsing_data';
 
 // ---- 运行时状态 ----
-const S = { tabId: null, siteId: null, sessStart: null, sessionMs: 0 };
+const S = {
+  tabId: null,          // 当前播放的tab ID
+  siteId: null,         // 当前播放的网站ID
+  sessStart: null,      // 当前播放的session开始时间
+  sessionMs: 0,         // 当前的使用时间
+  pausingStatus: null,  // 暂停状态，null表示未暂停。一旦触发暂停只能在接收到 pause_finished 之后解除
+};
 
 // ============================================================
 // 工具函数
@@ -148,16 +154,21 @@ async function flushSession() {
   if (elapsed < 1000) return;
 
   // 累加 session 计时器（暂停后清零）
-  S.sessionMs = (S.sessionMs || 0) + elapsed;
+  if(S.pausingStatus === null) {
+    // 只有当不在暂停状态时才增加计时器
+    S.sessionMs = (S.sessionMs || 0) + elapsed;
+  }
   S.sessStart = now;
 
   // 持久化今日累计（仅用于统计，不用于判定暂停）
-  const data = await loadData();
-  const day = todayStr();
-  if (!data[day]) data[day] = {};
-  data[day][S.siteId] = (data[day][S.siteId] || 0) + elapsed;
-  if (typeof data._lastPause !== 'number') data._lastPause = 0;
-  await saveData(data);
+  if(S.pausingStatus === null) {
+    const data = await loadData();
+    const day = todayStr();
+    if (!data[day]) data[day] = {};
+    data[day][S.siteId] = (data[day][S.siteId] || 0) + elapsed;
+    if (typeof data._lastPause !== 'number') data._lastPause = 0;
+    await saveData(data);
+  }
 }
 
 /** 检查是否超限，触发强制暂停 */
@@ -172,15 +183,22 @@ async function checkAndTriggerPause(cfg) {
   const cd = cfg.pauseCooldownMin * 60 * 1000;
   if (now - (data._lastPause || 0) < cd) return;
 
+  const pauseDurationMs = cfg.pauseDurationSec * 1000;
+
   // 向所有启用的视频站发送暂停消息
   for (const site of cfg.sites) {
     if (!site.enabled) continue;
     try {
       const tabs = await chrome.tabs.query({ url: site.matchUrl });
       for (const t of tabs) {
+        S.pausingStatus = {
+          siteLabel: site.label,
+          behaviourId: cfg.pauseBehaviourId || 'timer',
+          duration: pauseDurationMs,
+        };
         chrome.tabs.sendMessage(t.id, {
           action: 'force_pause',
-          duration: cfg.pauseDurationSec * 1000,
+          duration: pauseDurationMs,
           siteLabel: site.label,
           behaviourId: cfg.pauseBehaviourId || 'timer',
         }).catch(() => {});
@@ -247,6 +265,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, change, tab) => {
 chrome.alarms.create('periodic-check', { periodInMinutes: 1 });
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name !== 'periodic-check') return;
+
   const cfg = await loadConfig();
   if (S.siteId && S.sessStart !== null) {
     const elapsed = Date.now() - S.sessStart;
@@ -270,7 +289,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
 
       // session 计时器（暂停后清零）+ 当前会话进行中时长
       let sessionWatchMs = S.sessionMs || 0;
-      if (S.siteId && S.sessStart !== null) {
+      if (S.pausingStatus === null && S.siteId && S.sessStart !== null) {
         sessionWatchMs += (Date.now() - S.sessStart);
       }
 
@@ -292,11 +311,35 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
         nightStart: cfg.nightStart,
         nightEnd: cfg.nightEnd,
         browsingVideo: !!S.siteId,
+        isPausing: !!S.pausingStatus,
         currentLabel,
         lastPause: data._lastPause || 0,
       });
     })();
     return true;
+  }
+
+  // --- 检查内容页面是否需要进入暂停状态（防刷新绕过） ---
+  if (msg.action === 'check_pause_state') {
+    if (S.pausingStatus) {
+      reply({
+        shouldPause: true,
+        duration: S.pausingStatus.duration,
+        siteLabel: S.pausingStatus.siteLabel,
+        behaviourId: S.pausingStatus.behaviourId,
+      });
+    } else {
+      reply({ shouldPause: false });
+    }
+    return true;
+  }
+
+  // --- 内容页面暂停结束通知 ---
+  if (msg.action === 'pause_finished') {
+    console.log("[别刷了] Pause finished.")
+    S.pausingStatus = null;
+    reply({ ok: true });
+    return;
   }
 
   // --- 获取可用暂停行为列表 ---

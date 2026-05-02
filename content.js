@@ -27,6 +27,15 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   }
 });
 
+// ---- 页面初始化：检查是否需要恢复暂停（防刷新绕过） ----
+(function initPauseCheck() {
+  chrome.runtime.sendMessage({ action: 'check_pause_state' }, (res) => {
+    if (res && res.shouldPause) {
+      triggerPause(res.duration, res.siteLabel, res.behaviourId || 'timer');
+    }
+  });
+})();
+
 // ---- 强制暂停覆盖层 ----
 function triggerPause(duration, siteLabel, behaviourId) {
   if (_paused) return;
@@ -46,7 +55,6 @@ function triggerPause(duration, siteLabel, behaviourId) {
     _paused = false;
     return;
   }
-  console.log("Behaviour definition: ", behaviourDef);
 
   // ---- 构建覆盖层 ----
   const overlay = document.createElement('div');
@@ -91,6 +99,9 @@ function triggerPause(duration, siteLabel, behaviourId) {
     if (overlay.parentNode) overlay.remove();
 
     if (hadPlaying && video) video.play().catch(() => {});
+
+    // 通知后台暂停结束
+    chrome.runtime.sendMessage({ action: 'pause_finished' }).catch(() => {});
   };
 
   // ---- 由行为生成内部内容 ----
