@@ -50,7 +50,7 @@ function triggerPause(duration, siteLabel, behaviourId) {
   if (video && !video.paused) { video.pause(); hadPlaying = true; }
 
   // ---- 查找行为 ----
-  const behaviourDef = PAUSE_BEHAVIOURS[behaviourId] || PAUSE_BEHAVIOURS["timer"];
+  const behaviourDef = window.PAUSE_BEHAVIOURS[behaviourId] || window.PAUSE_BEHAVIOURS["timer"];
   if (!behaviourDef) {
     _paused = false;
     return;
