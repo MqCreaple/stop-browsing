@@ -4,20 +4,10 @@
 
 let _paused = false;
 
-// ---- 自动检测当前站点 ----
-function detectSiteLabel() {
-  const h = location.hostname;
-  if (h.includes('youtube')) return 'YouTube';
-  if (h.includes('bilibili')) return 'B站';
-  if (h.includes('tiktok'))  return 'TikTok';
-  if (h.includes('douyin'))  return '抖音';
-  return '视频';
-}
-
 // ---- 消息监听 ----
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   if (msg.action === 'force_pause') {
-    triggerPause(msg.duration, msg.siteLabel || detectSiteLabel(), msg.behaviourId || 'timer');
+    triggerPause(msg.duration, msg.siteLabel || '视频', msg.behaviourId || 'timer');
     reply({ started: true });
     return;
   }

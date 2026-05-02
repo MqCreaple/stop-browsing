@@ -3,20 +3,35 @@
 // ============================================================
 
 // ---- 默认配置 ----
-const DEFAULT_SITES = [
-  { id: 'youtube',  label: 'YouTube',  enabled: true,
-    matchUrl: '*://*.youtube.com/*',
-    videoRe: /^https?:\/\/(www\.)?(youtube\.com|m\.youtube\.com)\/watch\?v=/ },
-  { id: 'bilibili', label: 'B站',      enabled: true,
-    matchUrl: '*://*.bilibili.com/*',
-    videoRe: /^https?:\/\/(www\.)?bilibili\.com\/video\// },
-  { id: 'tiktok',   label: 'TikTok',   enabled: true,
-    matchUrl: '*://*.tiktok.com/*',
-    videoRe: /^https?:\/\/(www\.)?tiktok\.com\/@.+\/video\// },
-  { id: 'douyin',   label: '抖音',     enabled: true,
-    matchUrl: '*://*.douyin.com/*',
-    videoRe: /^https?:\/\/(www\.)?douyin\.com\/video\// },
-];
+const DEFAULT_SITES = {
+  youtube:     { label: 'YouTube',  enabled: true,
+                  matchUrl: '*://*.youtube.com/*',
+                  videoRe: /^https?:\/\/(www\.)?(youtube\.com|m\.youtube\.com)\/watch\?v=/ },
+  bilibili:    { label: 'B站',      enabled: true,
+                  matchUrl: '*://*.bilibili.com/*',
+                  videoRe: /^https?:\/\/(www\.)?bilibili\.com\/video\// },
+  tiktok:      { label: 'TikTok',   enabled: true,
+                  matchUrl: '*://*.tiktok.com/*',
+                  videoRe: /^https?:\/\/(www\.)?tiktok\.com\/@.+\/video\// },
+  douyin:      { label: '抖音',     enabled: true,
+                  matchUrl: '*://*.douyin.com/*',
+                  videoRe: /^https?:\/\/(www\.)?douyin\.com\/video\// },
+  xiaohongshu: { label: '小红书',   enabled: true,
+                  matchUrl: '*://*.xiaohongshu.com/*',
+                  videoRe: /^https?:\/\/(www\.)?xiaohongshu\.com\// },
+  zhihu:       { label: '知乎',     enabled: true,
+                  matchUrl: '*://*.zhihu.com/*',
+                  videoRe: /^https?:\/\/(www\.)?zhihu\.com\// },
+  weibo:       { label: '微博',     enabled: true,
+                  matchUrl: '*://*.weibo.com/*',
+                  videoRe: /^https?:\/\/(www\.)?weibo\.com\// },
+  tieba:       { label: '百度贴吧', enabled: true,
+                  matchUrl: '*://*.tieba.baidu.com/*',
+                  videoRe: /^https?:\/\/(www\.)?tieba\.baidu\.com\// },
+  twitter:     { label: 'Twitter/X', enabled: true,
+                  matchUrl: '*://*.x.com/*',
+                  videoRe: /^https?:\/\/(www\.)?(x\.com|twitter\.com)\// },
+};
 
 const DEFAULT_CONFIG = {
   sites: DEFAULT_SITES,
@@ -73,10 +88,16 @@ async function loadConfig() {
   const saved = r[CFG_KEY] || {};
   const merged = { ...DEFAULT_CONFIG, ...saved };
   // 合并站点列表
-  merged.sites = DEFAULT_SITES.map(def => {
-    const existing = (saved.sites || []).find(x => x.id === def.id);
-    return existing ? { ...def, enabled: existing.enabled } : { ...def };
-  });
+  // 合并站点列表（兼容旧版数组格式的存储）
+  const savedSites = saved.sites || {};
+  const savedMap = Array.isArray(savedSites)
+    ? Object.fromEntries(savedSites.map(s => [s.id, s]))
+    : savedSites;
+  merged.sites = {};
+  for (const [id, def] of Object.entries(DEFAULT_SITES)) {
+    const savedSite = savedMap[id];
+    merged.sites[id] = savedSite ? { ...def, enabled: savedSite.enabled } : { ...def };
+  }
   return merged;
 }
 
@@ -115,9 +136,9 @@ async function getTodayAllTimes(data, day) {
   const cfg = await loadConfig();
   const result = {};
   let total = 0;
-  for (const site of cfg.sites) {
-    const ms = d[site.id] || 0;
-    result[site.id] = ms;
+  for (const [id, site] of Object.entries(cfg.sites)) {
+    const ms = d[id] || 0;
+    result[id] = ms;
     if (site.enabled) total += ms;
   }
   return { perSite: result, total };
@@ -140,8 +161,8 @@ function currentLimitMs(cfg) {
 /** 检测 URL 匹配哪个站点，返回站点配置或 null */
 function matchSite(url, cfg) {
   if (!url) return null;
-  for (const site of cfg.sites) {
-    if (site.enabled && site.videoRe.test(url)) return site;
+  for (const [id, site] of Object.entries(cfg.sites)) {
+    if (site.enabled && site.videoRe.test(url)) return { ...site, id };
   }
   return null;
 }
@@ -186,7 +207,7 @@ async function checkAndTriggerPause(cfg) {
   const pauseDurationMs = cfg.pauseDurationSec * 1000;
 
   // 向所有启用的视频站发送暂停消息
-  for (const site of cfg.sites) {
+  for (const [, site] of Object.entries(cfg.sites)) {
     if (!site.enabled) continue;
     try {
       const tabs = await chrome.tabs.query({ url: site.matchUrl });
@@ -292,11 +313,13 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       if (S.pausingStatus === null && S.siteId && S.sessStart !== null) {
         sessionWatchMs += (Date.now() - S.sessStart);
       }
+      console.log("Session time: ", sessionWatchMs / 1000, "seconds");
 
       // 当前正在观看的站点标签
       let currentLabel = '未在观看视频';
       if (S.siteId) {
-        const site = cfg.sites.find(s => s.id === S.siteId);
+        const site = cfg.sites[S.siteId];
+        // 设置页也需要站点列表
         currentLabel = site ? `正在观看 ${site.label}` : '正在观看视频';
       }
 
@@ -310,6 +333,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
         isNight: isNight(cfg),
         nightStart: cfg.nightStart,
         nightEnd: cfg.nightEnd,
+        sites: cfg.sites,
         browsingVideo: !!S.siteId,
         isPausing: !!S.pausingStatus,
         currentLabel,
@@ -394,8 +418,8 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
         const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
         const dayData = data[key] || {};
         let total = 0;
-        for (const site of cfg.sites) {
-          if (site.enabled) total += (dayData[site.id] || 0);
+        for (const [id, site] of Object.entries(cfg.sites)) {
+          if (site.enabled) total += (dayData[id] || 0);
         }
         days.push({ date: key, total, totalFormatted: fmtTime(total) });
       }

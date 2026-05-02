@@ -93,9 +93,10 @@
           .filter(([, ms]) => ms > 0)
           .sort((a, b) => b[1] - a[1])
           .map(([id, ms]) => {
+            const label = (status.sites && status.sites[id] && status.sites[id].label) || id;
             const p = Math.min((ms / status.limit) * 100, 100);
             return `<div class="stat-row">
-              <span class="stat-label">${siteLabel(id)}</span>
+              <span class="stat-label">${label}</span>
               <span class="stat-value" style="font-size:13px;">${formatMs(ms)}</span>
             </div>
             <div class="progress-bar" style="height:3px;margin:0 0 4px;">
@@ -117,11 +118,6 @@
         </div>`;
       }).join('');
     });
-  }
-
-  function siteLabel(id) {
-    const map = { youtube: 'YouTube', bilibili: 'B站', tiktok: 'TikTok', douyin: '抖音' };
-    return map[id] || id;
   }
 
   function formatMs(ms) {
@@ -234,11 +230,11 @@
       });
 
       const list = $('site-list');
-      list.innerHTML = cfg.sites.map(s => `
+      list.innerHTML = Object.entries(cfg.sites).map(([id, s]) => `
         <div class="site-toggle">
           <span class="site-label">${s.label}</span>
           <label class="switch">
-            <input type="checkbox" data-site-id="${s.id}" ${s.enabled ? 'checked' : ''}>
+            <input type="checkbox" data-site-id="${id}" ${s.enabled ? 'checked' : ''}>
             <span class="slider"></span>
           </label>
         </div>
@@ -304,10 +300,15 @@
   function getDefaultCfg() {
     return {
       sites: [
-        { id: 'youtube',  enabled: true },
-        { id: 'bilibili', enabled: true },
-        { id: 'tiktok',   enabled: true },
-        { id: 'douyin',   enabled: true },
+        { id: 'youtube',     enabled: true },
+        { id: 'bilibili',    enabled: true },
+        { id: 'tiktok',      enabled: true },
+        { id: 'douyin',      enabled: true },
+        { id: 'xiaohongshu', enabled: true },
+        { id: 'zhihu',       enabled: true },
+        { id: 'weibo',       enabled: true },
+        { id: 'tieba',       enabled: true },
+        { id: 'twitter',     enabled: true },
       ],
       nightStart: 23,
       nightEnd: 6,

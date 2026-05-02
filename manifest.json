@@ -12,7 +12,12 @@
     "*://*.youtube.com/*",
     "*://*.bilibili.com/*",
     "*://*.tiktok.com/*",
-    "*://*.douyin.com/*"
+    "*://*.douyin.com/*",
+    "*://*.xiaohongshu.com/*",
+    "*://*.zhihu.com/*",
+    "*://*.weibo.com/*",
+    "*://*.tieba.baidu.com/*",
+    "*://*.x.com/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -23,7 +28,12 @@
         "*://*.youtube.com/*",
         "*://*.bilibili.com/*",
         "*://*.tiktok.com/*",
-        "*://*.douyin.com/*"
+        "*://*.douyin.com/*",
+        "*://*.xiaohongshu.com/*",
+        "*://*.zhihu.com/*",
+        "*://*.weibo.com/*",
+        "*://*.tieba.baidu.com/*",
+        "*://*.x.com/*"
       ],
       "js": ["pause-behaviour/index.js", "pause-behaviour/timer.js", "pause-behaviour/quiz.js", "pause-behaviour/tripos.js", "content.js"],
       "run_at": "document_idle"
