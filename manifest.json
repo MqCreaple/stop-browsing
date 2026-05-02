@@ -25,7 +25,7 @@
         "*://*.tiktok.com/*",
         "*://*.douyin.com/*"
       ],
-      "js": ["pause-behaviour/index.js", "pause-behaviour/timer.js", "pause-behaviour/quiz.js", "content.js"],
+      "js": ["pause-behaviour/index.js", "pause-behaviour/timer.js", "pause-behaviour/quiz.js", "pause-behaviour/tripos.js", "content.js"],
       "run_at": "document_idle"
     }
   ],

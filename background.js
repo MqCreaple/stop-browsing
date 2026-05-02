@@ -347,6 +347,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     reply([
       { id: 'timer', name: '⏱ 倒计时', description: '等待指定时间后自动恢复' },
       { id: 'quiz', name: '🧮 四则运算', description: '完成 10 道算术题后才能恢复' },
+      { id: 'tripos', name: '📐 Tripos 数学真题', description: '看一道历年数学真题，倒计时结束后确认完成' },
     ]);
     return;
   }

@@ -16,7 +16,7 @@
       const sec = Math.ceil(duration / 1000);
 
       const el = document.createElement('div');
-      el.style.cssText = 'text-align:center;padding:32px 40px;max-width:520px;';
+      el.style.cssText = 'text-align:center;padding:32px 40px;max-width:960px;';
       el.innerHTML = `
         <div style="font-size:72px;line-height:1;margin-bottom:12px;">🦞</div>
         <div style="font-size:24px;font-weight:700;margin-bottom:4px;letter-spacing:1px;">

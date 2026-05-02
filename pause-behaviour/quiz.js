@@ -68,7 +68,7 @@
       let giveUpRemaining = 0;
 
       const container = document.createElement('div');
-      container.style.cssText = 'text-align:center;padding:24px 32px;max-width:420px;';
+      container.style.cssText = 'text-align:center;padding:24px 32px;max-width:960px;';
 
       container.innerHTML = `
         <div style="font-size:60px;line-height:1;margin-bottom:6px;">🧮</div>
