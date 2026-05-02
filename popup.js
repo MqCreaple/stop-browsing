@@ -5,8 +5,8 @@
 (function () {
   function $(id) { return document.getElementById(id); }
 
-  let _timer = null;           // 刷新定时器
-  let _intervalMs = 20000;     // 当前刷新间隔
+  let _timer = null;
+  let _intervalMs = 20000;
 
   // ---- Toast 提示 ----
   let toastTimer = null;
@@ -33,15 +33,13 @@
   // 动态刷新调度
   // ============================================================
 
-  /** 设置刷新间隔：看视频时 1 秒，否则 20 秒 */
   function adjustInterval(onVideo) {
     const desired = onVideo ? 1000 : 20000;
-    if (_intervalMs === desired) return;  // 无需切换
+    if (_intervalMs === desired) return;
     _intervalMs = desired;
     clearInterval(_timer);
     _timer = setInterval(refreshMonitor, _intervalMs);
 
-    // 更新提示文字
     const hint = $('refresh-hint');
     hint.textContent = onVideo ? '实时更新中' : '每 20 秒刷新';
   }
@@ -57,10 +55,8 @@
         return;
       }
 
-      // ---- 动态调整刷新间隔 ----
       adjustInterval(status.browsingVideo);
 
-      // ---- 使用实时总时长（含当前会话进行中） ----
       const liveMs = status.sessionWatchMs;
       $('time-spent').textContent = status.sessionFormatted;
       $('time-limit').textContent = status.limitFormatted;
@@ -91,7 +87,6 @@
       const ts = now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
       $('footer-text').textContent = `${ts} · ${status.today}`;
 
-      // ---- 各站点明细 ----
       const sb = $('site-breakdown');
       if (status.perSite) {
         sb.innerHTML = Object.entries(status.perSite)
@@ -110,7 +105,6 @@
       }
     });
 
-    // ---- 日志 ----
     chrome.runtime.sendMessage({ action: 'get_log' }, (log) => {
       if (!log || !log.days) return;
       const container = $('log-container');
@@ -161,7 +155,6 @@
     { id: 'pause-cooldown',  label: '暂停冷却',     min: 0,  max: 60 },
   ];
 
-  /** 清除所有字段的错误状态 */
   function clearAllErrors() {
     for (const f of FIELD_RULES) {
       $(f.id).classList.remove('input-error');
@@ -169,7 +162,6 @@
     }
   }
 
-  /** 验证单个字段，返回 { valid, value } */
   function validateField(id) {
     const rule = FIELD_RULES.find(f => f.id === id);
     const input = $(id);
@@ -185,7 +177,6 @@
     return { valid, value: valid ? val : null };
   }
 
-  /** 验证所有字段，返回 { valid, values } */
   function validateAll() {
     const values = {};
     let allValid = true;
@@ -197,9 +188,35 @@
     return { valid: allValid, values };
   }
 
-  // ---- 输入时实时验证 ----
   for (const f of FIELD_RULES) {
     $(f.id).addEventListener('input', () => validateField(f.id));
+  }
+
+  // ============================================================
+  // 暂停行为选择器渲染
+  // ============================================================
+  function renderBehaviourSelector(behaviours, selectedId) {
+    const list = $('pause-behaviour-list');
+    const desc = $('pause-behaviour-desc');
+    if (!list) return;
+
+    list.innerHTML = behaviours.map(b => `
+      <label class="pause-behaviour-option">
+        <input type="radio" name="pause-behaviour" value="${b.id}"
+          ${b.id === selectedId ? 'checked' : ''}>
+        <span class="pause-behaviour-name">${b.name}</span>
+      </label>
+    `).join('');
+
+    const selected = behaviours.find(b => b.id === selectedId);
+    desc.textContent = selected ? selected.description : '';
+
+    list.querySelectorAll('input[name="pause-behaviour"]').forEach(rb => {
+      rb.addEventListener('change', (e) => {
+        const b = behaviours.find(x => x.id === e.target.value);
+        desc.textContent = b ? b.description : '';
+      });
+    });
   }
 
   // ============================================================
@@ -209,6 +226,12 @@
     chrome.runtime.sendMessage({ action: 'load_config' }, (cfg) => {
       if (!cfg) return;
       clearAllErrors();
+
+      chrome.runtime.sendMessage({ action: 'get_behaviours' }, (behaviours) => {
+        if (behaviours && behaviours.length > 0) {
+          renderBehaviourSelector(behaviours, cfg.pauseBehaviourId || 'timer');
+        }
+      });
 
       const list = $('site-list');
       list.innerHTML = cfg.sites.map(s => `
@@ -230,7 +253,6 @@
     });
   }
 
-  /** 收集已验证通过的设置参数 */
   function collectSettings() {
     const sites = [];
     document.querySelectorAll('#site-list input[type="checkbox"]').forEach(cb => {
@@ -240,6 +262,9 @@
     const { valid, values } = validateAll();
     if (!valid) return null;
 
+    const selected = document.querySelector('input[name="pause-behaviour"]:checked');
+    const pauseBehaviourId = selected ? selected.value : 'timer';
+
     return {
       sites,
       nightStart:       values['night-start'],
@@ -248,6 +273,7 @@
       nightLimitMin:    values['night-limit'],
       pauseDurationSec: values['pause-duration'],
       pauseCooldownMin: values['pause-cooldown'],
+      pauseBehaviourId,
     };
   }
 
@@ -289,6 +315,7 @@
       nightLimitMin: 20,
       pauseDurationSec: 30,
       pauseCooldownMin: 5,
+      pauseBehaviourId: 'timer',
     };
   }
 
@@ -298,6 +325,5 @@
   refreshMonitor();
   _timer = setInterval(refreshMonitor, _intervalMs);
 
-  // 弹窗关闭时清理定时器（好习惯）
   window.addEventListener('unload', () => clearInterval(_timer));
 })();

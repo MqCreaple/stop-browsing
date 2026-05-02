@@ -26,6 +26,7 @@ const DEFAULT_CONFIG = {
   nightLimitMin: 20,
   pauseDurationSec: 30,
   pauseCooldownMin: 5,
+  pauseBehaviourId: 'timer',
 };
 
 const CFG_KEY = 'stop_browsing_config';
@@ -181,6 +182,7 @@ async function checkAndTriggerPause(cfg) {
           action: 'force_pause',
           duration: cfg.pauseDurationSec * 1000,
           siteLabel: site.label,
+          behaviourId: cfg.pauseBehaviourId || 'timer',
         }).catch(() => {});
       }
     } catch { /* 静默 */ }
@@ -295,6 +297,15 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       });
     })();
     return true;
+  }
+
+  // --- 获取可用暂停行为列表 ---
+  if (msg.action === 'get_behaviours') {
+    reply([
+      { id: 'timer', name: '⏱ 倒计时', description: '等待指定时间后自动恢复' },
+      { id: 'quiz', name: '🧮 四则运算', description: '完成 10 道算术题后才能恢复' },
+    ]);
+    return;
   }
 
   // --- 获取配置 ---

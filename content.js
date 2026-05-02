@@ -3,7 +3,6 @@
 // ============================================================
 
 let _paused = false;
-let _cleanup = null;
 
 // ---- 自动检测当前站点 ----
 function detectSiteLabel() {
@@ -18,7 +17,7 @@ function detectSiteLabel() {
 // ---- 消息监听 ----
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   if (msg.action === 'force_pause') {
-    triggerPause(msg.duration, msg.siteLabel || detectSiteLabel());
+    triggerPause(msg.duration, msg.siteLabel || detectSiteLabel(), msg.behaviourId || 'timer');
     reply({ started: true });
     return;
   }
@@ -29,7 +28,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
 });
 
 // ---- 强制暂停覆盖层 ----
-function triggerPause(duration, siteLabel) {
+function triggerPause(duration, siteLabel, behaviourId) {
   if (_paused) return;
   _paused = true;
 
@@ -40,6 +39,14 @@ function triggerPause(duration, siteLabel) {
   const video = document.querySelector('video');
   let hadPlaying = false;
   if (video && !video.paused) { video.pause(); hadPlaying = true; }
+
+  // ---- 查找行为 ----
+  const behaviourDef = PAUSE_BEHAVIOURS[behaviourId] || PAUSE_BEHAVIOURS["timer"];
+  if (!behaviourDef) {
+    _paused = false;
+    return;
+  }
+  console.log("Behaviour definition: ", behaviourDef);
 
   // ---- 构建覆盖层 ----
   const overlay = document.createElement('div');
@@ -54,8 +61,8 @@ function triggerPause(duration, siteLabel) {
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    fontFamily: '"Segoe UI", "Microsoft YaHei", "PingFang SC", Arial, sans-serif',
-    color: '#ffffff',
+    fontFamily: '"Segoe UI","Microsoft YaHei","PingFang SC",Arial,sans-serif',
+    color: '#fff',
     cursor: 'default',
     userSelect: 'none',
     WebkitUserSelect: 'none',
@@ -64,45 +71,55 @@ function triggerPause(duration, siteLabel) {
     padding: '0',
   });
 
-  const sec = Math.ceil(duration / 1000);
-  overlay.innerHTML = `
-    <div style="text-align:center;padding:32px 40px;max-width:520px;">
-      <div style="font-size:72px;line-height:1;margin-bottom:12px;">🦞</div>
-      <div style="font-size:24px;font-weight:700;margin-bottom:4px;letter-spacing:1px;">
-        别刷了！
-      </div>
-      <div style="font-size:14px;color:#aaa;margin-bottom:4px;line-height:1.6;">
-        你在 <span style="color:#fff;font-weight:600;">${siteLabel}</span> 上的时间已超过今日限制
-      </div>
-      <div style="font-size:13px;color:#888;margin-bottom:20px;">
-        请暂停休息一下
-      </div>
-      <div style="font-size:60px;font-weight:800;color:#ff4444;line-height:1;margin-bottom:8px;"
-           id="stop-browsing-countdown">${sec}</div>
-      <div style="font-size:14px;color:#888;">秒后自动恢复</div>
-    </div>
-  `;
+  // ---- 构建清理函数 ----
+  let aborted = false;
+  let cleanupCallbacks = [];
+
+  const cleanUp = () => {
+    if (aborted) return;
+    aborted = true;
+    _paused = false;
+
+    for (const cb of cleanupCallbacks) cb();
+
+    document.removeEventListener('keydown', preventAllCapture, true);
+    document.removeEventListener('keyup', preventAllCapture, true);
+    document.removeEventListener('keypress', preventAllCapture, true);
+    document.removeEventListener('contextmenu', preventAllCapture, true);
+
+    observer.disconnect();
+    if (overlay.parentNode) overlay.remove();
+
+    if (hadPlaying && video) video.play().catch(() => {});
+  };
+
+  // ---- 由行为生成内部内容 ----
+  const contentEl = behaviourDef.create(cleanUp, { duration, siteLabel, behaviourId });
+  if (contentEl) overlay.appendChild(contentEl);
 
   document.body.appendChild(overlay);
 
-  // ---- 阻止所有输入 ----
-  const preventAll = (e) => { e.preventDefault(); e.stopPropagation(); };
-  const preventAllCapture = (e) => { e.preventDefault(); e.stopPropagation(); };
+  // ---- 阻止所有输入（但放行 data-pause-interactive 元素） ----
+  const preventAllCapture = (e) => {
+    if (e.target && e.target.closest && e.target.closest('[data-pause-interactive]')) return;
+    e.preventDefault();
+    e.stopPropagation();
+  };
 
   document.addEventListener('keydown', preventAllCapture, true);
   document.addEventListener('keyup', preventAllCapture, true);
   document.addEventListener('keypress', preventAllCapture, true);
   document.addEventListener('contextmenu', preventAllCapture, true);
 
-  overlay.addEventListener('click', preventAll);
-  overlay.addEventListener('mousedown', preventAll);
-  overlay.addEventListener('mouseup', preventAll);
-  overlay.addEventListener('pointerdown', preventAll);
-  overlay.addEventListener('pointerup', preventAll);
-  overlay.addEventListener('wheel', preventAll, { passive: false });
-  overlay.addEventListener('touchstart', preventAll, { passive: false });
+  overlay.addEventListener('click', preventAllCapture);
+  overlay.addEventListener('mousedown', preventAllCapture);
+  overlay.addEventListener('mouseup', preventAllCapture);
+  overlay.addEventListener('pointerdown', preventAllCapture);
+  overlay.addEventListener('pointerup', preventAllCapture);
+  overlay.addEventListener('wheel', preventAllCapture, { passive: false });
+  overlay.addEventListener('touchstart', preventAllCapture, { passive: false });
 
-  // ---- MutationObserver：防止被 DOM 移除 ----
+  // ---- MutationObserver：防止覆盖层被移除 ----
   const observer = new MutationObserver(() => {
     if (!document.body.contains(overlay)) {
       document.body.appendChild(overlay);
@@ -110,40 +127,11 @@ function triggerPause(duration, siteLabel) {
   });
   observer.observe(document.body, { childList: true, subtree: true });
 
-  // ---- 倒计时 ----
-  const cd = document.getElementById('stop-browsing-countdown');
-  let remaining = sec;
-  const countdownTimer = setInterval(() => {
-    remaining--;
-    if (cd) cd.textContent = Math.max(0, remaining);
-    if (remaining <= 0) clearInterval(countdownTimer);
-  }, 1000);
-
-  // ---- 到期清理 ----
-  const cleanupTimer = setTimeout(() => {
-    clearInterval(countdownTimer);
-    observer.disconnect();
-
-    document.removeEventListener('keydown', preventAllCapture, true);
-    document.removeEventListener('keyup', preventAllCapture, true);
-    document.removeEventListener('keypress', preventAllCapture, true);
-    document.removeEventListener('contextmenu', preventAllCapture, true);
-
-    overlay.remove();
-    if (hadPlaying && video) video.play().catch(() => {});
-    _paused = false;
-  }, duration);
-
-  _cleanup = () => {
-    clearInterval(countdownTimer);
-    clearTimeout(cleanupTimer);
-    observer.disconnect();
-    document.removeEventListener('keydown', preventAllCapture, true);
-    document.removeEventListener('keyup', preventAllCapture, true);
-    document.removeEventListener('keypress', preventAllCapture, true);
-    document.removeEventListener('contextmenu', preventAllCapture, true);
-    if (overlay.parentNode) overlay.remove();
-    _paused = false;
-    _cleanup = null;
-  };
+  // ---- 保存行为的清理函数 ----
+  if (contentEl._pauseAbort) {
+    cleanupCallbacks.push(() => contentEl._pauseAbort());
+  }
+  if (contentEl._pauseTimer) {
+    cleanupCallbacks.push(() => clearInterval(contentEl._pauseTimer));
+  }
 }

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "别刷了！",
-  "version": "2.0.0",
+  "version": "0.0.2",
   "description": "监控多平台视频网站使用时间，超限后强制暂停休息",
   "permissions": [
     "tabs",
@@ -25,7 +25,7 @@
         "*://*.tiktok.com/*",
         "*://*.douyin.com/*"
       ],
-      "js": ["content.js"],
+      "js": ["pause-behaviour.js", "content.js"],
       "run_at": "document_idle"
     }
   ],
