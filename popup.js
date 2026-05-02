@@ -5,6 +5,9 @@
 (function () {
   function $(id) { return document.getElementById(id); }
 
+  let _timer = null;          // 刷新定时器
+  let _intervalMs = 5000;     // 当前刷新间隔
+
   // ---- Toast 提示 ----
   let toastTimer = null;
   function showToast(msg) {
@@ -27,6 +30,23 @@
   });
 
   // ============================================================
+  // 动态刷新调度
+  // ============================================================
+
+  /** 设置刷新间隔：看视频时 1 秒，否则 5 秒 */
+  function adjustInterval(onVideo) {
+    const desired = onVideo ? 1000 : 5000;
+    if (_intervalMs === desired) return;  // 无需切换
+    _intervalMs = desired;
+    clearInterval(_timer);
+    _timer = setInterval(refreshMonitor, _intervalMs);
+
+    // 更新提示文字
+    const hint = $('refresh-hint');
+    hint.textContent = onVideo ? '实时更新中' : '每 5 秒刷新';
+  }
+
+  // ============================================================
   // 监控页：刷新状态
   // ============================================================
   function refreshMonitor() {
@@ -37,10 +57,15 @@
         return;
       }
 
-      $('time-spent').textContent = status.totalFormatted;
+      // ---- 动态调整刷新间隔 ----
+      adjustInterval(status.browsingVideo);
+
+      // ---- 使用实时总时长（含当前会话进行中） ----
+      const liveMs = status.currentSessionMs;
+      $('time-spent').textContent = status.sessionFormatted;
       $('time-limit').textContent = status.limitFormatted;
 
-      const pct = Math.min((status.total / status.limit) * 100, 100);
+      const pct = Math.min((liveMs / status.limit) * 100, 100);
       const bar = $('progress-fill');
       bar.style.width = pct.toFixed(1) + '%';
       bar.className = 'progress-fill';
@@ -56,14 +81,14 @@
         : `<span class="tag tag-day">☀️ 日间模式</span>`;
 
       const label = $('status-label');
-      if (status.currentLabel.includes('正在观看')) {
+      if (status.browsingVideo) {
         label.innerHTML = `<span class="status-dot active"></span>${status.currentLabel}`;
       } else {
         label.innerHTML = `<span class="status-dot inactive"></span>${status.currentLabel}`;
       }
 
       const now = new Date();
-      const ts = now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+      const ts = now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
       $('footer-text').textContent = `${ts} · ${status.today}`;
 
       // ---- 各站点明细 ----
@@ -74,9 +99,8 @@
           .sort((a, b) => b[1] - a[1])
           .map(([id, ms]) => {
             const p = Math.min((ms / status.limit) * 100, 100);
-            const name = id.charAt(0).toUpperCase() + id.slice(1);
             return `<div class="stat-row">
-              <span class="stat-label">${id === 'youtube' ? 'YouTube' : id === 'bilibili' ? 'B站' : id === 'tiktok' ? 'TikTok' : id === 'douyin' ? '抖音' : name}</span>
+              <span class="stat-label">${siteLabel(id)}</span>
               <span class="stat-value" style="font-size:13px;">${formatMs(ms)}</span>
             </div>
             <div class="progress-bar" style="height:3px;margin:0 0 4px;">
@@ -93,13 +117,17 @@
       container.innerHTML = log.days.map(d => {
         const isToday = d.date === log.days[log.days.length - 1].date;
         const dateLabel = isToday ? '今天' : d.date.slice(5);
-        const pct = isToday ? '' : '';
         return `<div class="stat-row" style="padding:3px 0;font-size:12px;">
           <span style="color:#888;">${dateLabel}</span>
           <span style="color:#aaa;">${d.totalFormatted || '0秒'}</span>
         </div>`;
       }).join('');
     });
+  }
+
+  function siteLabel(id) {
+    const map = { youtube: 'YouTube', bilibili: 'B站', tiktok: 'TikTok', douyin: '抖音' };
+    return map[id] || id;
   }
 
   function formatMs(ms) {
@@ -127,7 +155,6 @@
     chrome.runtime.sendMessage({ action: 'load_config' }, (cfg) => {
       if (!cfg) return;
 
-      // 站点切换
       const list = $('site-list');
       list.innerHTML = cfg.sites.map(s => `
         <div class="site-toggle">
@@ -139,7 +166,6 @@
         </div>
       `).join('');
 
-      // 数值字段
       $('night-start').value = cfg.nightStart;
       $('night-end').value   = cfg.nightEnd;
       $('day-limit').value   = cfg.dayLimitMin;
@@ -175,16 +201,13 @@
 
   $('btn-default-cfg').addEventListener('click', () => {
     if (!confirm('恢复所有设置为默认值？')) return;
-    chrome.runtime.sendMessage({ action: 'load_config' }, (cfg) => {
-      // 用默认值覆盖
-      const def = getDefaultCfg();
-      chrome.runtime.sendMessage({ action: 'save_config', config: def }, (res) => {
-        if (res && res.ok) {
-          loadSettings();
-          refreshMonitor();
-          showToast('已恢复默认设置');
-        }
-      });
+    const def = getDefaultCfg();
+    chrome.runtime.sendMessage({ action: 'save_config', config: def }, (res) => {
+      if (res && res.ok) {
+        loadSettings();
+        refreshMonitor();
+        showToast('已恢复默认设置');
+      }
     });
   });
 
@@ -209,7 +232,8 @@
   // 初始化
   // ============================================================
   refreshMonitor();
-  setInterval(refreshMonitor, 5000);
+  _timer = setInterval(refreshMonitor, _intervalMs);
 
-  window.refreshMonitor = refreshMonitor;
+  // 弹窗关闭时清理定时器（好习惯）
+  window.addEventListener('unload', () => clearInterval(_timer));
 })();

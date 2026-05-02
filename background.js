@@ -272,6 +272,12 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       const day = todayStr();
       const { perSite, total } = await getTodayAllTimes(data, day);
 
+      // 实时总时长 = 已存入时长 + 当前会话进行中的时长
+      let currentSessionMs = total;
+      if (S.siteId && S.sessStart !== null) {
+        currentSessionMs += (Date.now() - S.sessStart);
+      }
+
       // 当前正在观看的站点标签
       let currentLabel = '未在观看视频';
       if (S.siteId) {
@@ -283,12 +289,14 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
         today: day,
         perSite,
         total,
-        totalFormatted: fmtTime(total),
+        currentSessionMs,
+        sessionFormatted: fmtTime(currentSessionMs),
         limit: currentLimitMs(cfg),
         limitFormatted: fmtTime(currentLimitMs(cfg)),
         isNight: isNight(cfg),
         nightStart: cfg.nightStart,
         nightEnd: cfg.nightEnd,
+        browsingVideo: !!S.siteId,
         currentLabel,
         lastPause: data._lastPause || 0,
       });
