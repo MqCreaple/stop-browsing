@@ -5,8 +5,8 @@
 (function () {
   function $(id) { return document.getElementById(id); }
 
-  let _timer = null;          // 刷新定时器
-  let _intervalMs = 5000;     // 当前刷新间隔
+  let _timer = null;           // 刷新定时器
+  let _intervalMs = 20000;     // 当前刷新间隔
 
   // ---- Toast 提示 ----
   let toastTimer = null;
@@ -61,7 +61,7 @@
       adjustInterval(status.browsingVideo);
 
       // ---- 使用实时总时长（含当前会话进行中） ----
-      const liveMs = status.currentSessionMs;
+      const liveMs = status.sessionWatchMs;
       $('time-spent').textContent = status.sessionFormatted;
       $('time-limit').textContent = status.limitFormatted;
 
@@ -149,11 +149,66 @@
   });
 
   // ============================================================
+  // 设置页：验证规则
+  // ============================================================
+
+  const FIELD_RULES = [
+    { id: 'night-start',     label: '夜间起始',     min: 1,  max: 24 },
+    { id: 'night-end',       label: '夜间结束',     min: 0,  max: 23 },
+    { id: 'day-limit',       label: '日间限制',     min: 1,  max: 999 },
+    { id: 'night-limit',     label: '夜间限制',     min: 1,  max: 999 },
+    { id: 'pause-duration',  label: '暂停时长',     min: 10, max: 300 },
+    { id: 'pause-cooldown',  label: '暂停冷却',     min: 0,  max: 60 },
+  ];
+
+  /** 清除所有字段的错误状态 */
+  function clearAllErrors() {
+    for (const f of FIELD_RULES) {
+      $(f.id).classList.remove('input-error');
+      $(`err-${f.id}`).classList.remove('visible');
+    }
+  }
+
+  /** 验证单个字段，返回 { valid, value } */
+  function validateField(id) {
+    const rule = FIELD_RULES.find(f => f.id === id);
+    const input = $(id);
+    const errEl = $(`err-${id}`);
+    const raw = input.value.trim();
+    const val = parseInt(raw, 10);
+
+    const valid = /^\d+$/.test(raw) && Number.isFinite(val) && val >= rule.min && val <= rule.max;
+
+    input.classList.toggle('input-error', !valid);
+    errEl.classList.toggle('visible', !valid);
+
+    return { valid, value: valid ? val : null };
+  }
+
+  /** 验证所有字段，返回 { valid, values } */
+  function validateAll() {
+    const values = {};
+    let allValid = true;
+    for (const f of FIELD_RULES) {
+      const r = validateField(f.id);
+      values[f.id] = r.value;
+      if (!r.valid) allValid = false;
+    }
+    return { valid: allValid, values };
+  }
+
+  // ---- 输入时实时验证 ----
+  for (const f of FIELD_RULES) {
+    $(f.id).addEventListener('input', () => validateField(f.id));
+  }
+
+  // ============================================================
   // 设置页：加载 & 保存
   // ============================================================
   function loadSettings() {
     chrome.runtime.sendMessage({ action: 'load_config' }, (cfg) => {
       if (!cfg) return;
+      clearAllErrors();
 
       const list = $('site-list');
       list.innerHTML = cfg.sites.map(s => `
@@ -175,32 +230,35 @@
     });
   }
 
+  /** 收集已验证通过的设置参数 */
   function collectSettings() {
     const sites = [];
     document.querySelectorAll('#site-list input[type="checkbox"]').forEach(cb => {
       sites.push({ id: cb.dataset.siteId, enabled: cb.checked });
     });
-    const nightStart = parseInt($('night-start').value);
-    const nightEnd = parseInt($('night-end').value);
-    const dayLimitMin = parseInt($('day-limit').value);
-    const nightLimitMin = parseInt($('night-limit').value);
-    const pauseDurationSec = parseInt($('pause-duration').value);
-    const pauseCooldown = parseInt($('pause-cooldown').value);
+
+    const { valid, values } = validateAll();
+    if (!valid) return null;
+
     return {
       sites,
-      nightStart:     (Number.isFinite(nightStart) && nightStart > 0 && nightStart <= 24) ? nightStart : 23,
-      nightEnd:       (Number.isFinite(nightEnd) && nightEnd >= 0 && nightEnd < 24) ? nightEnd : 6,
-      dayLimitMin:    Number.isFinite(dayLimitMin) ? dayLimitMin : 60,
-      nightLimitMin:  Number.isFinite(nightLimitMin) ? nightLimitMin : 20,
-      pauseDurationSec: (Number.isFinite(pauseDurationSec) && pauseDurationSec > 0) ? pauseDurationSec : 30,
-      pauseCooldownMin: Number.isFinite(pauseCooldown) ? pauseCooldown : 5,
+      nightStart:       values['night-start'],
+      nightEnd:         values['night-end'],
+      dayLimitMin:      values['day-limit'],
+      nightLimitMin:    values['night-limit'],
+      pauseDurationSec: values['pause-duration'],
+      pauseCooldownMin: values['pause-cooldown'],
     };
   }
 
   $('btn-save-cfg').addEventListener('click', () => {
     const cfg = collectSettings();
+    if (!cfg) { showToast('⚠️ 请修正标红的参数'); return; }
     chrome.runtime.sendMessage({ action: 'save_config', config: cfg }, (res) => {
-      if (res && res.ok) showToast('✓ 设置已保存');
+      if (res && res.ok) {
+        showToast('✓ 设置已保存');
+        clearAllErrors();
+      }
       refreshMonitor();
     });
   });

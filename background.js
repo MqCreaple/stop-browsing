@@ -32,7 +32,7 @@ const CFG_KEY = 'stop_browsing_config';
 const DATA_KEY = 'stop_browsing_data';
 
 // ---- 运行时状态 ----
-const S = { tabId: null, siteId: null, sessStart: null };
+const S = { tabId: null, siteId: null, sessStart: null, sessionMs: 0 };
 
 // ============================================================
 // 工具函数
@@ -142,27 +142,30 @@ function matchSite(url, cfg) {
 /** 将当前会话时长刷入持久存储 */
 async function flushSession() {
   if (!S.siteId || S.sessStart === null) return;
-  const elapsed = Date.now() - S.sessStart;
+  const now = Date.now();
+  const elapsed = now - S.sessStart;
   if (elapsed < 1000) return;
 
+  // 累加 session 计时器（暂停后清零）
+  S.sessionMs = (S.sessionMs || 0) + elapsed;
+  S.sessStart = now;
+
+  // 持久化今日累计（仅用于统计，不用于判定暂停）
   const data = await loadData();
   const day = todayStr();
   if (!data[day]) data[day] = {};
   data[day][S.siteId] = (data[day][S.siteId] || 0) + elapsed;
   if (typeof data._lastPause !== 'number') data._lastPause = 0;
   await saveData(data);
-
-  S.sessStart = Date.now();
 }
 
 /** 检查是否超限，触发强制暂停 */
 async function checkAndTriggerPause(cfg) {
   const data = await loadData();
-  const day = todayStr();
-  const { total } = await getTodayAllTimes(data, day);
   const limit = currentLimitMs(cfg);
+  const sessionMs = S.sessionMs || 0;
 
-  if (total < limit) return;
+  if (sessionMs < limit) return;
 
   const now = Date.now();
   const cd = cfg.pauseCooldownMin * 60 * 1000;
@@ -185,7 +188,8 @@ async function checkAndTriggerPause(cfg) {
 
   data._lastPause = now;
   await saveData(data);
-  console.log(`[别刷了] Pause triggered (total=${fmtTime(total)}, limit=${fmtTime(limit)})`);
+  S.sessionMs = 0;  // 暂停后清零 session 计时器
+  console.log(`[别刷了] Pause triggered (session=${fmtTime(sessionMs)}, limit=${fmtTime(limit)})`);
 }
 
 /** 将当前标签页设为新的目标并开始计时 */
@@ -260,12 +264,12 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       const cfg = await loadConfig();
       const data = await loadData();
       const day = todayStr();
-      const { perSite, total } = await getTodayAllTimes(data, day);
+      const { perSite } = await getTodayAllTimes(data, day);
 
-      // 实时总时长 = 已存入时长 + 当前会话进行中的时长
-      let currentSessionMs = total;
+      // session 计时器（暂停后清零）+ 当前会话进行中时长
+      let sessionWatchMs = S.sessionMs || 0;
       if (S.siteId && S.sessStart !== null) {
-        currentSessionMs += (Date.now() - S.sessStart);
+        sessionWatchMs += (Date.now() - S.sessStart);
       }
 
       // 当前正在观看的站点标签
@@ -278,9 +282,8 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       reply({
         today: day,
         perSite,
-        total,
-        currentSessionMs,
-        sessionFormatted: fmtTime(currentSessionMs),
+        sessionWatchMs,
+        sessionFormatted: fmtTime(sessionWatchMs),
         limit: currentLimitMs(cfg),
         limitFormatted: fmtTime(currentLimitMs(cfg)),
         isNight: isNight(cfg),
