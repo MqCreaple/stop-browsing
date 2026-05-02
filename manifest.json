@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "YouTube 时间监控",
+  "version": "1.0.0",
+  "description": "监控 YouTube 使用时间，超时后强制暂停",
+  "permissions": [
+    "tabs",
+    "storage",
+    "alarms"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.youtube.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "YouTube 时间监控"
+  }
+}
