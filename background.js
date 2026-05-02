@@ -1,37 +1,43 @@
 // ============================================================
-// YouTube 时间监控 - 后台 Service Worker
+// 别刷了！ - 后台 Service Worker
 // ============================================================
 
-const CFG = {
-  // YouTube 视频页面正则
-  VIDEO_REGEX: /^https?:\/\/(www\.)?(youtube\.com|m\.youtube\.com)\/watch\?v=/,
+// ---- 默认配置 ----
+const DEFAULT_SITES = [
+  { id: 'youtube',  label: 'YouTube',  enabled: true,
+    matchUrl: '*://*.youtube.com/*',
+    videoRe: /^https?:\/\/(www\.)?(youtube\.com|m\.youtube\.com)\/watch\?v=/ },
+  { id: 'bilibili', label: 'B站',      enabled: true,
+    matchUrl: '*://*.bilibili.com/*',
+    videoRe: /^https?:\/\/(www\.)?bilibili\.com\/video\// },
+  { id: 'tiktok',   label: 'TikTok',   enabled: true,
+    matchUrl: '*://*.tiktok.com/*',
+    videoRe: /^https?:\/\/(www\.)?tiktok\.com\/@.+\/video\// },
+  { id: 'douyin',   label: '抖音',     enabled: true,
+    matchUrl: '*://*.douyin.com/*',
+    videoRe: /^https?:\/\/(www\.)?douyin\.com\/video\// },
+];
 
-  // 存储 key
-  STORAGE_KEY: 'yt_monitor_v2',
-
-  // 时间限制（毫秒）
-  DAY_LIMIT_MS:   60 * 60 * 1000,   // 1 小时（白天）
-  NIGHT_LIMIT_MS: 20 * 60 * 1000,   // 20 分钟（夜间）
-
-  // 夜间时段
-  NIGHT_START: 23,  // 23:00
-  NIGHT_END:   6,   // 06:00
-
-  // 暂停设置
-  PAUSE_DURATION_MS: 30 * 1000,      // 强制暂停 30 秒
-  PAUSE_COOLDOWN_MS: 5 * 60 * 1000,  // 两次暂停最小间隔 5 分钟
+const DEFAULT_CONFIG = {
+  sites: DEFAULT_SITES,
+  nightStart: 23,
+  nightEnd: 6,
+  dayLimitMin: 60,
+  nightLimitMin: 20,
+  pauseDurationSec: 30,
+  pauseCooldownMin: 5,
 };
 
-// ============================================================
-// 运行时状态（内存中，service worker 重启后重置）
-// ============================================================
-const _state = { tabId: null, onYt: false, sessStart: null };
+const CFG_KEY = 'stop_browsing_config';
+const DATA_KEY = 'stop_browsing_data';
+
+// ---- 运行时状态 ----
+const S = { tabId: null, siteId: null, sessStart: null };
 
 // ============================================================
 // 工具函数
 // ============================================================
 
-/** 获取今日日期字符串 (YYYY-MM-DD, 本地时区) */
 function todayStr() {
   const d = new Date();
   const y = d.getFullYear();
@@ -40,18 +46,6 @@ function todayStr() {
   return `${y}-${m}-${day}`;
 }
 
-/** 判断当前是否为夜间时段 */
-function isNight() {
-  const h = new Date().getHours();
-  return h >= CFG.NIGHT_START || h < CFG.NIGHT_END;
-}
-
-/** 获取当前限制（毫秒） */
-function currentLimit() {
-  return isNight() ? CFG.NIGHT_LIMIT_MS : CFG.DAY_LIMIT_MS;
-}
-
-/** 格式化毫秒为 时:分:秒 */
 function fmtTime(ms) {
   const total = Math.floor(ms / 1000);
   const h = Math.floor(total / 3600);
@@ -63,190 +57,264 @@ function fmtTime(ms) {
 }
 
 // ============================================================
-// 持久化存储
+// 配置管理
 // ============================================================
 
+/** 从存储加载配置，与默认值合并（确保新增站点自动出现） */
+async function loadConfig() {
+  const r = await chrome.storage.local.get(CFG_KEY);
+  const saved = r[CFG_KEY] || {};
+  const merged = { ...DEFAULT_CONFIG, ...saved };
+  // 合并站点列表
+  merged.sites = DEFAULT_SITES.map(def => {
+    const existing = (saved.sites || []).find(x => x.id === def.id);
+    return existing ? { ...def, enabled: existing.enabled } : { ...def };
+  });
+  return merged;
+}
+
+async function saveConfig(cfg) {
+  await chrome.storage.local.set({ [CFG_KEY]: cfg });
+}
+
+/** 获取默认配置（仅用于重置） */
+function getDefaultConfig() {
+  return JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+}
+
+// ============================================================
+// 时间数据管理
+// ============================================================
+
+/** 存储格式: { "2026-05-02": { youtube: 1000, bilibili: 2000, ... }, _lastPause: ts } */
 async function loadData() {
-  const r = await chrome.storage.local.get(CFG.STORAGE_KEY);
-  return r[CFG.STORAGE_KEY] || {};
+  const r = await chrome.storage.local.get(DATA_KEY);
+  return r[DATA_KEY] || {};
 }
 
 async function saveData(data) {
-  await chrome.storage.local.set({ [CFG.STORAGE_KEY]: data });
+  await chrome.storage.local.set({ [DATA_KEY]: data });
+}
+
+/** 获取某个站点今天的累计时间 */
+async function getTodayTime(data, siteId, day) {
+  const d = data[day] || {};
+  return d[siteId] || 0;
+}
+
+/** 获取今天所有站点的累计时间 */
+async function getTodayAllTimes(data, day) {
+  const d = data[day] || {};
+  const cfg = await loadConfig();
+  const result = {};
+  let total = 0;
+  for (const site of cfg.sites) {
+    const ms = d[site.id] || 0;
+    result[site.id] = ms;
+    if (site.enabled) total += ms;
+  }
+  return { perSite: result, total };
 }
 
 // ============================================================
 // 核心逻辑
 // ============================================================
 
-/**
- * 将当前会话时长刷入持久存储，重置会话计时器。
- * 仅在 onYt = true 且 sessStart 有效时执行。
- */
-async function flushSession() {
-  if (!_state.onYt || _state.sessStart === null) return;
-  const elapsed = Date.now() - _state.sessStart;
-  if (elapsed < 1000) return; // 忽略 < 1s 的抖动
-
-  const data = await loadData();
-  const d = todayStr();
-  data[d] = (data[d] || 0) + elapsed;
-  data._lastPause = data._lastPause || 0;
-  await saveData(data);
-
-  _state.sessStart = Date.now(); // 重置会话起点
+function isNight(cfg) {
+  const h = new Date().getHours();
+  return h >= cfg.nightStart || h < cfg.nightEnd;
 }
 
-/**
- * 检查是否达到限制，需要触发强制暂停。
- * 若满足条件，向所有 YouTube 标签页发送暂停消息。
- */
-async function checkAndTriggerPause() {
-  const data = await loadData();
-  const d = todayStr();
-  const acc = data[d] || 0;
-  const limit = currentLimit();
+function currentLimitMs(cfg) {
+  const min = isNight(cfg) ? cfg.nightLimitMin : cfg.dayLimitMin;
+  return min * 60 * 1000;
+}
 
-  if (acc < limit) return; // 未超限
+/** 检测 URL 匹配哪个站点，返回站点配置或 null */
+function matchSite(url, cfg) {
+  if (!url) return null;
+  for (const site of cfg.sites) {
+    if (site.enabled && site.videoRe.test(url)) return site;
+  }
+  return null;
+}
+
+/** 将当前会话时长刷入持久存储 */
+async function flushSession() {
+  if (!S.siteId || S.sessStart === null) return;
+  const elapsed = Date.now() - S.sessStart;
+  if (elapsed < 1000) return;
+
+  const data = await loadData();
+  const day = todayStr();
+  if (!data[day]) data[day] = {};
+  data[day][S.siteId] = (data[day][S.siteId] || 0) + elapsed;
+  if (typeof data._lastPause !== 'number') data._lastPause = 0;
+  await saveData(data);
+
+  S.sessStart = Date.now();
+}
+
+/** 检查是否超限，触发强制暂停 */
+async function checkAndTriggerPause(cfg) {
+  const data = await loadData();
+  const day = todayStr();
+  const { total } = await getTodayAllTimes(data, day);
+  const limit = currentLimitMs(cfg);
+
+  if (total < limit) return;
 
   const now = Date.now();
-  if (now - (data._lastPause || 0) < CFG.PAUSE_COOLDOWN_MS) return; // 冷却中
+  const cd = cfg.pauseCooldownMin * 60 * 1000;
+  if (now - (data._lastPause || 0) < cd) return;
 
-  // 向所有 YouTube 标签页发送暂停消息
-  const tabs = await chrome.tabs.query({ url: '*://*.youtube.com/*' });
-  let sent = 0;
-  for (const t of tabs) {
+  // 向所有启用的视频站发送暂停消息
+  for (const site of cfg.sites) {
+    if (!site.enabled) continue;
     try {
-      await chrome.tabs.sendMessage(t.id, {
-        action: 'force_pause',
-        duration: CFG.PAUSE_DURATION_MS,
-      });
-      sent++;
-    } catch {
-      // 内容脚本可能还未加载
-    }
+      const tabs = await chrome.tabs.query({ url: site.matchUrl });
+      for (const t of tabs) {
+        chrome.tabs.sendMessage(t.id, {
+          action: 'force_pause',
+          duration: cfg.pauseDurationSec * 1000,
+          siteLabel: site.label,
+        }).catch(() => {});
+      }
+    } catch { /* 静默 */ }
   }
 
   data._lastPause = now;
   await saveData(data);
-
-  if (sent > 0) {
-    console.log(`[YT Monitor] Pause triggered (acc=${fmtTime(acc)}, limit=${fmtTime(limit)})`);
-  }
+  console.log(`[别刷了] Pause triggered (total=${fmtTime(total)}, limit=${fmtTime(limit)})`);
 }
 
-/**
- * 更新当前激活标签页的状态。
- * 如果新标签页是 YouTube 视频，开始计时；否则停止。
- */
-async function updateActiveTab(tabId) {
+/** 将当前标签页设为新的目标并开始计时 */
+async function switchToTab(tabId) {
   await flushSession();
-  _state.tabId = tabId;
-  _state.onYt = false;
-  _state.sessStart = null;
+  S.tabId = tabId;
+  S.siteId = null;
+  S.sessStart = null;
 
   try {
     const tab = await chrome.tabs.get(tabId);
-    if (tab.url && CFG.VIDEO_REGEX.test(tab.url)) {
-      _state.onYt = true;
-      _state.sessStart = Date.now();
-      // 切换到 YouTube 时立即检查是否需要暂停
-      await checkAndTriggerPause();
+    const cfg = await loadConfig();
+    const matched = matchSite(tab.url, cfg);
+    if (matched) {
+      S.siteId = matched.id;
+      S.sessStart = Date.now();
+      await checkAndTriggerPause(cfg);
     }
-  } catch {
-    // 标签页可能已关闭
-  }
+  } catch { /* 标签页可能已关闭 */ }
 }
 
-/**
- * 停止当前会话（窗口失焦、URL 变更等）。
- */
 async function stopSession() {
   await flushSession();
-  _state.onYt = false;
-  _state.sessStart = null;
+  S.siteId = null;
+  S.sessStart = null;
 }
 
 // ============================================================
 // 事件监听
 // ============================================================
 
-// 标签页激活切换
 chrome.tabs.onActivated.addListener(async (info) => {
-  await updateActiveTab(info.tabId);
+  await switchToTab(info.tabId);
 });
 
-// 标签页 URL 变更
 chrome.tabs.onUpdated.addListener(async (tabId, change, tab) => {
-  if (tabId !== _state.tabId || !change.url) return;
+  if (tabId !== S.tabId || !change.url) return;
   await stopSession();
-  if (CFG.VIDEO_REGEX.test(change.url)) {
-    _state.onYt = true;
-    _state.sessStart = Date.now();
-    await checkAndTriggerPause();
+  const cfg = await loadConfig();
+  const matched = matchSite(change.url, cfg);
+  if (matched) {
+    S.siteId = matched.id;
+    S.sessStart = Date.now();
+    await checkAndTriggerPause(cfg);
   }
 });
 
-// 窗口聚焦变化（窗口失焦时停止计时）
 chrome.windows.onFocusChanged.addListener(async (windowId) => {
   if (windowId === chrome.windows.WINDOW_ID_NONE) {
-    // 浏览器完全失焦
     await stopSession();
     return;
   }
-  // 窗口获得焦点 → 重查激活标签页
   try {
     const tabs = await chrome.tabs.query({ active: true, windowId });
-    if (tabs.length > 0) {
-      await updateActiveTab(tabs[0].id);
-    }
-  } catch {
-    await stopSession();
-  }
+    if (tabs.length > 0) await switchToTab(tabs[0].id);
+  } catch { await stopSession(); }
 });
 
 // ============================================================
-// 周期检查（每分钟唤醒一次，即使 service worker 被休眠）
+// 周期检查（每分钟）
 // ============================================================
 
-chrome.alarms.create('yt-periodic-check', { periodInMinutes: 1 });
+chrome.alarms.create('periodic-check', { periodInMinutes: 1 });
 chrome.alarms.onAlarm.addListener(async (alarm) => {
-  if (alarm.name === 'yt-periodic-check') {
-    // 刷新当前会话时间（防止标签页切换事件丢失）
-    if (_state.onYt && _state.sessStart !== null) {
-      const elapsed = Date.now() - _state.sessStart;
-      if (elapsed >= 60_000) {
-        // 如果持续观看超过 1 分钟，确保时间被记录
-        await flushSession();
-      }
-    }
-    await checkAndTriggerPause();
+  if (alarm.name !== 'periodic-check') return;
+  const cfg = await loadConfig();
+  if (S.siteId && S.sessStart !== null) {
+    const elapsed = Date.now() - S.sessStart;
+    if (elapsed >= 60_000) await flushSession();
   }
+  await checkAndTriggerPause(cfg);
 });
 
 // ============================================================
-// 消息 API（供 popup 调用）
+// 消息 API
 // ============================================================
 
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
+  // --- 获取状态 ---
   if (msg.action === 'get_status') {
     (async () => {
+      const cfg = await loadConfig();
       const data = await loadData();
-      const d = todayStr();
+      const day = todayStr();
+      const { perSite, total } = await getTodayAllTimes(data, day);
+
+      // 当前正在观看的站点标签
+      let currentLabel = '未在观看视频';
+      if (S.siteId) {
+        const site = cfg.sites.find(s => s.id === S.siteId);
+        currentLabel = site ? `正在观看 ${site.label}` : '正在观看视频';
+      }
+
       reply({
-        today: d,
-        limit: currentLimit(),
-        limitFormatted: fmtTime(currentLimit()),
-        isNight: isNight(),
-        accumulated: data[d] || 0,
-        accumulatedFormatted: fmtTime(data[d] || 0),
-        onYt: _state.onYt,
+        today: day,
+        perSite,
+        total,
+        totalFormatted: fmtTime(total),
+        limit: currentLimitMs(cfg),
+        limitFormatted: fmtTime(currentLimitMs(cfg)),
+        isNight: isNight(cfg),
+        nightStart: cfg.nightStart,
+        nightEnd: cfg.nightEnd,
+        currentLabel,
         lastPause: data._lastPause || 0,
       });
     })();
-    return true; // 保持通道开放以支持异步 reply
+    return true;
   }
 
+  // --- 获取配置 ---
+  if (msg.action === 'load_config') {
+    (async () => {
+      const cfg = await loadConfig();
+      reply(cfg);
+    })();
+    return true;
+  }
+
+  // --- 保存配置 ---
+  if (msg.action === 'save_config') {
+    (async () => {
+      await saveConfig(msg.config);
+      reply({ ok: true });
+    })();
+    return true;
+  }
+
+  // --- 重置今日数据 ---
   if (msg.action === 'reset_today') {
     (async () => {
       const data = await loadData();
@@ -257,17 +325,23 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     return true;
   }
 
+  // --- 获取最近 7 天日志 ---
   if (msg.action === 'get_log') {
     (async () => {
+      const cfg = await loadConfig();
       const data = await loadData();
-      // 返回最近 7 天的日志
-      const days = [];
       const now = new Date();
+      const days = [];
       for (let i = 6; i >= 0; i--) {
         const d = new Date(now);
         d.setDate(d.getDate() - i);
         const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-        days.push({ date: key, ms: data[key] || 0, fmt: fmtTime(data[key] || 0) });
+        const dayData = data[key] || {};
+        let total = 0;
+        for (const site of cfg.sites) {
+          if (site.enabled) total += (dayData[site.id] || 0);
+        }
+        days.push({ date: key, total, totalFormatted: fmtTime(total) });
       }
       reply({ days });
     })();
@@ -276,20 +350,20 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
 });
 
 // ============================================================
-// 初始化：启动时检查当前状态
+// 初始化
 // ============================================================
 
 (async function init() {
   try {
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
     if (tabs.length > 0) {
-      _state.tabId = tabs[0].id;
-      if (tabs[0].url && CFG.VIDEO_REGEX.test(tabs[0].url)) {
-        _state.onYt = true;
-        _state.sessStart = Date.now();
+      const cfg = await loadConfig();
+      const matched = matchSite(tabs[0].url, cfg);
+      if (matched) {
+        S.tabId = tabs[0].id;
+        S.siteId = matched.id;
+        S.sessStart = Date.now();
       }
     }
-  } catch {
-    // 静默失败
-  }
+  } catch { /* 静默 */ }
 })();

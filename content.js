@@ -1,14 +1,24 @@
 // ============================================================
-// YouTube 时间监控 - 内容脚本（运行在 YouTube 页面内）
+// 别刷了！ - 内容脚本
 // ============================================================
 
 let _paused = false;
 let _cleanup = null;
 
-// ---- 监听后台消息 ----
+// ---- 自动检测当前站点 ----
+function detectSiteLabel() {
+  const h = location.hostname;
+  if (h.includes('youtube')) return 'YouTube';
+  if (h.includes('bilibili')) return 'B站';
+  if (h.includes('tiktok'))  return 'TikTok';
+  if (h.includes('douyin'))  return '抖音';
+  return '视频';
+}
+
+// ---- 消息监听 ----
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   if (msg.action === 'force_pause') {
-    triggerPause(msg.duration);
+    triggerPause(msg.duration, msg.siteLabel || detectSiteLabel());
     reply({ started: true });
     return;
   }
@@ -18,28 +28,23 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   }
 });
 
-// ---- 暂停覆盖层 ----
-function triggerPause(duration) {
-  if (_paused) return; // 已在暂停中
+// ---- 强制暂停覆盖层 ----
+function triggerPause(duration, siteLabel) {
+  if (_paused) return;
   _paused = true;
 
-  // 退出全屏（确保 overlay 可见）
+  // 退出全屏
   try { if (document.fullscreenElement) document.exitFullscreen(); } catch {}
 
   // 暂停视频
   const video = document.querySelector('video');
   let hadPlaying = false;
-  if (video && !video.paused) {
-    video.pause();
-    hadPlaying = true;
-  }
+  if (video && !video.paused) { video.pause(); hadPlaying = true; }
 
-  // ---- 构建覆盖层 DOM ----
+  // ---- 构建覆盖层 ----
   const overlay = document.createElement('div');
-  overlay.id = 'yt-monitor-overlay';
-
-  // 用 CSSStyleDeclaration 批量设置样式
-  const css = {
+  overlay.id = 'stop-browsing-overlay';
+  Object.assign(overlay.style, {
     position: 'fixed',
     top: '0', left: '0', right: '0', bottom: '0',
     width: '100vw', height: '100vh',
@@ -57,63 +62,56 @@ function triggerPause(duration) {
     boxSizing: 'border-box',
     margin: '0',
     padding: '0',
-  };
-  Object.assign(overlay.style, css);
+  });
 
   const sec = Math.ceil(duration / 1000);
   overlay.innerHTML = `
-    <div style="text-align:center;padding:32px 40px;max-width:480px;">
-      <div style="font-size:72px;line-height:1;margin-bottom:12px;">⏰</div>
-      <div style="font-size:26px;font-weight:700;margin-bottom:6px;letter-spacing:1px;">
-        YouTube 时间限制
+    <div style="text-align:center;padding:32px 40px;max-width:520px;">
+      <div style="font-size:72px;line-height:1;margin-bottom:12px;">🦞</div>
+      <div style="font-size:24px;font-weight:700;margin-bottom:4px;letter-spacing:1px;">
+        别刷了！
       </div>
-      <div style="font-size:14px;color:#aaa;margin-bottom:20px;line-height:1.6;">
-        你已超过今日观看时限，请暂停休息一下
+      <div style="font-size:14px;color:#aaa;margin-bottom:4px;line-height:1.6;">
+        你在 <span style="color:#fff;font-weight:600;">${siteLabel}</span> 上的时间已超过今日限制
+      </div>
+      <div style="font-size:13px;color:#888;margin-bottom:20px;">
+        请暂停休息一下
       </div>
       <div style="font-size:60px;font-weight:800;color:#ff4444;line-height:1;margin-bottom:8px;"
-           id="yt-monitor-countdown">${sec}</div>
+           id="stop-browsing-countdown">${sec}</div>
       <div style="font-size:14px;color:#888;">秒后自动恢复</div>
     </div>
   `;
 
   document.documentElement.appendChild(overlay);
 
-  // ---- 阻止所有用户输入 ----
-  const prevent = (e) => { e.preventDefault(); e.stopPropagation(); return false; };
-  const preventInput = (e) => { e.preventDefault(); e.stopPropagation(); };
+  // ---- 阻止所有输入 ----
+  const preventAll = (e) => { e.preventDefault(); e.stopPropagation(); };
+  const preventAllCapture = (e) => { e.preventDefault(); e.stopPropagation(); };
 
-  // 键盘事件（捕获阶段拦截）
-  document.addEventListener('keydown', preventInput, true);
-  document.addEventListener('keyup', preventInput, true);
-  document.addEventListener('keypress', preventInput, true);
+  document.addEventListener('keydown', preventAllCapture, true);
+  document.addEventListener('keyup', preventAllCapture, true);
+  document.addEventListener('keypress', preventAllCapture, true);
+  document.addEventListener('contextmenu', preventAllCapture, true);
 
-  // 鼠标事件（覆盖层上拦截）
-  overlay.addEventListener('click', prevent);
-  overlay.addEventListener('mousedown', prevent);
-  overlay.addEventListener('mouseup', prevent);
-  overlay.addEventListener('pointerdown', prevent);
-  overlay.addEventListener('pointerup', prevent);
-
-  // 右键菜单
-  document.addEventListener('contextmenu', preventInput, true);
-
-  // 滚轮（防止通过滚动绕过）
-  overlay.addEventListener('wheel', prevent, { passive: false });
-
-  // 触摸
-  overlay.addEventListener('touchstart', prevent, { passive: false });
+  overlay.addEventListener('click', preventAll);
+  overlay.addEventListener('mousedown', preventAll);
+  overlay.addEventListener('mouseup', preventAll);
+  overlay.addEventListener('pointerdown', preventAll);
+  overlay.addEventListener('pointerup', preventAll);
+  overlay.addEventListener('wheel', preventAll, { passive: false });
+  overlay.addEventListener('touchstart', preventAll, { passive: false });
 
   // ---- MutationObserver：防止被 DOM 移除 ----
   const observer = new MutationObserver(() => {
     if (!document.body.contains(overlay)) {
-      // 重新添加
       document.documentElement.appendChild(overlay);
     }
   });
   observer.observe(document.documentElement, { childList: true, subtree: true });
 
   // ---- 倒计时 ----
-  const cd = document.getElementById('yt-monitor-countdown');
+  const cd = document.getElementById('stop-browsing-countdown');
   let remaining = sec;
   const countdownTimer = setInterval(() => {
     remaining--;
@@ -126,19 +124,13 @@ function triggerPause(duration) {
     clearInterval(countdownTimer);
     observer.disconnect();
 
-    // 移除事件监听（需与上面相同的函数引用）
-    document.removeEventListener('keydown', preventInput, true);
-    document.removeEventListener('keyup', preventInput, true);
-    document.removeEventListener('keypress', preventInput, true);
-    document.removeEventListener('contextmenu', preventInput, true);
+    document.removeEventListener('keydown', preventAllCapture, true);
+    document.removeEventListener('keyup', preventAllCapture, true);
+    document.removeEventListener('keypress', preventAllCapture, true);
+    document.removeEventListener('contextmenu', preventAllCapture, true);
 
     overlay.remove();
-
-    // 恢复视频播放
-    if (hadPlaying && video) {
-      video.play().catch(() => {});
-    }
-
+    if (hadPlaying && video) video.play().catch(() => {});
     _paused = false;
   }, duration);
 
@@ -146,10 +138,10 @@ function triggerPause(duration) {
     clearInterval(countdownTimer);
     clearTimeout(cleanupTimer);
     observer.disconnect();
-    document.removeEventListener('keydown', preventInput, true);
-    document.removeEventListener('keyup', preventInput, true);
-    document.removeEventListener('keypress', preventInput, true);
-    document.removeEventListener('contextmenu', preventInput, true);
+    document.removeEventListener('keydown', preventAllCapture, true);
+    document.removeEventListener('keyup', preventAllCapture, true);
+    document.removeEventListener('keypress', preventAllCapture, true);
+    document.removeEventListener('contextmenu', preventAllCapture, true);
     if (overlay.parentNode) overlay.remove();
     _paused = false;
     _cleanup = null;

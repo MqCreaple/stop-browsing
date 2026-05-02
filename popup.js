@@ -1,11 +1,35 @@
 // ============================================================
-// YouTube 时间监控 - 弹窗交互
+// 别刷了！ - 弹窗交互
 // ============================================================
 
 (function () {
   function $(id) { return document.getElementById(id); }
 
-  function updateStatus() {
+  // ---- Toast 提示 ----
+  let toastTimer = null;
+  function showToast(msg) {
+    const t = $('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove('show'), 2000);
+  }
+
+  // ---- 标签页切换 ----
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      btn.classList.add('active');
+      $(`tab-${btn.dataset.tab}`).classList.add('active');
+      if (btn.dataset.tab === 'settings') loadSettings();
+    });
+  });
+
+  // ============================================================
+  // 监控页：刷新状态
+  // ============================================================
+  function refreshMonitor() {
     chrome.runtime.sendMessage({ action: 'get_status' }, (status) => {
       if (!status) {
         $('time-spent').textContent = '连接失败';
@@ -13,70 +37,179 @@
         return;
       }
 
-      // 今日时间
-      $('time-spent').textContent = status.accumulatedFormatted;
+      $('time-spent').textContent = status.totalFormatted;
       $('time-limit').textContent = status.limitFormatted;
 
-      // 进度条
-      const pct = Math.min((status.accumulated / status.limit) * 100, 100);
+      const pct = Math.min((status.total / status.limit) * 100, 100);
       const bar = $('progress-fill');
       bar.style.width = pct.toFixed(1) + '%';
       bar.className = 'progress-fill';
       if (pct >= 100) bar.classList.add('danger');
       else if (pct >= 80) bar.classList.add('warning');
 
-      // 超限状态
       const spentEl = $('time-spent');
       spentEl.className = 'stat-value' + (pct >= 100 ? ' over-limit' : '');
 
-      // 模式标签
       const tag = $('mode-tag');
-      if (status.isNight) {
-        tag.innerHTML = '<span class="tag tag-night">🌙 夜间模式（20分钟限制）</span>';
-      } else {
-        tag.innerHTML = '<span class="tag tag-day">☀️ 日间模式（60分钟限制）</span>';
-      }
+      tag.innerHTML = status.isNight
+        ? `<span class="tag tag-night">🌙 夜间模式</span>`
+        : `<span class="tag tag-day">☀️ 日间模式</span>`;
 
-      // 当前标签页状态
       const label = $('status-label');
-      if (status.onYt) {
-        label.innerHTML = '<span class="status-dot active"></span>正在观看 YouTube';
+      if (status.currentLabel.includes('正在观看')) {
+        label.innerHTML = `<span class="status-dot active"></span>${status.currentLabel}`;
       } else {
-        label.innerHTML = '<span class="status-dot inactive"></span>未在观看视频';
+        label.innerHTML = `<span class="status-dot inactive"></span>${status.currentLabel}`;
       }
 
-      // 脚注
       const now = new Date();
-      const timeStr = now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-      $('footer-text').textContent = `更新于 ${timeStr} · ${status.today}`;
+      const ts = now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+      $('footer-text').textContent = `${ts} · ${status.today}`;
+
+      // ---- 各站点明细 ----
+      const sb = $('site-breakdown');
+      if (status.perSite) {
+        sb.innerHTML = Object.entries(status.perSite)
+          .filter(([, ms]) => ms > 0)
+          .sort((a, b) => b[1] - a[1])
+          .map(([id, ms]) => {
+            const p = Math.min((ms / status.limit) * 100, 100);
+            const name = id.charAt(0).toUpperCase() + id.slice(1);
+            return `<div class="stat-row">
+              <span class="stat-label">${id === 'youtube' ? 'YouTube' : id === 'bilibili' ? 'B站' : id === 'tiktok' ? 'TikTok' : id === 'douyin' ? '抖音' : name}</span>
+              <span class="stat-value" style="font-size:13px;">${formatMs(ms)}</span>
+            </div>
+            <div class="progress-bar" style="height:3px;margin:0 0 4px;">
+              <div class="progress-fill" style="width:${p.toFixed(1)}%;background:rgba(78,205,196,0.5);"></div>
+            </div>`;
+          }).join('') || '<div style="color:#555;font-size:12px;">今日暂无使用记录</div>';
+      }
     });
 
-    // 获取历史记录
+    // ---- 日志 ----
     chrome.runtime.sendMessage({ action: 'get_log' }, (log) => {
       if (!log || !log.days) return;
       const container = $('log-container');
       container.innerHTML = log.days.map(d => {
         const isToday = d.date === log.days[log.days.length - 1].date;
         const dateLabel = isToday ? '今天' : d.date.slice(5);
-        return `<div class="log-entry">
-          <span>${dateLabel}</span>
-          <span class="log-val">${d.fmt || '0秒'}</span>
+        const pct = isToday ? '' : '';
+        return `<div class="stat-row" style="padding:3px 0;font-size:12px;">
+          <span style="color:#888;">${dateLabel}</span>
+          <span style="color:#aaa;">${d.totalFormatted || '0秒'}</span>
         </div>`;
       }).join('');
     });
   }
 
-  // 重置按钮
+  function formatMs(ms) {
+    const total = Math.floor(ms / 1000);
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    if (h > 0) return `${h}时${m}分`;
+    if (m > 0) return `${m}分${s}秒`;
+    return `${s}秒`;
+  }
+
+  // ---- 重置 ----
   $('btn-reset').addEventListener('click', () => {
-    if (!confirm('确认重置今日的 YouTube 使用数据？')) return;
+    if (!confirm('确认重置今日的所有使用数据？')) return;
     chrome.runtime.sendMessage({ action: 'reset_today' }, (res) => {
-      if (res && res.ok) updateStatus();
+      if (res && res.ok) { refreshMonitor(); showToast('已重置今日数据'); }
     });
   });
 
-  // 初始加载
-  updateStatus();
+  // ============================================================
+  // 设置页：加载 & 保存
+  // ============================================================
+  function loadSettings() {
+    chrome.runtime.sendMessage({ action: 'load_config' }, (cfg) => {
+      if (!cfg) return;
 
-  // 每 5 秒自动刷新
-  setInterval(updateStatus, 5000);
+      // 站点切换
+      const list = $('site-list');
+      list.innerHTML = cfg.sites.map(s => `
+        <div class="site-toggle">
+          <span class="site-label">${s.label}</span>
+          <label class="switch">
+            <input type="checkbox" data-site-id="${s.id}" ${s.enabled ? 'checked' : ''}>
+            <span class="slider"></span>
+          </label>
+        </div>
+      `).join('');
+
+      // 数值字段
+      $('night-start').value = cfg.nightStart;
+      $('night-end').value   = cfg.nightEnd;
+      $('day-limit').value   = cfg.dayLimitMin;
+      $('night-limit').value = cfg.nightLimitMin;
+      $('pause-duration').value = cfg.pauseDurationSec;
+      $('pause-cooldown').value = cfg.pauseCooldownMin;
+    });
+  }
+
+  function collectSettings() {
+    const sites = [];
+    document.querySelectorAll('#site-list input[type="checkbox"]').forEach(cb => {
+      sites.push({ id: cb.dataset.siteId, enabled: cb.checked });
+    });
+    return {
+      sites,
+      nightStart:     parseInt($('night-start').value) || 23,
+      nightEnd:       parseInt($('night-end').value) || 6,
+      dayLimitMin:    parseInt($('day-limit').value) || 60,
+      nightLimitMin:  parseInt($('night-limit').value) || 20,
+      pauseDurationSec: parseInt($('pause-duration').value) || 30,
+      pauseCooldownMin: parseInt($('pause-cooldown').value) || 5,
+    };
+  }
+
+  $('btn-save-cfg').addEventListener('click', () => {
+    const cfg = collectSettings();
+    chrome.runtime.sendMessage({ action: 'save_config', config: cfg }, (res) => {
+      if (res && res.ok) showToast('✓ 设置已保存');
+      refreshMonitor();
+    });
+  });
+
+  $('btn-default-cfg').addEventListener('click', () => {
+    if (!confirm('恢复所有设置为默认值？')) return;
+    chrome.runtime.sendMessage({ action: 'load_config' }, (cfg) => {
+      // 用默认值覆盖
+      const def = getDefaultCfg();
+      chrome.runtime.sendMessage({ action: 'save_config', config: def }, (res) => {
+        if (res && res.ok) {
+          loadSettings();
+          refreshMonitor();
+          showToast('已恢复默认设置');
+        }
+      });
+    });
+  });
+
+  function getDefaultCfg() {
+    return {
+      sites: [
+        { id: 'youtube',  enabled: true },
+        { id: 'bilibili', enabled: true },
+        { id: 'tiktok',   enabled: true },
+        { id: 'douyin',   enabled: true },
+      ],
+      nightStart: 23,
+      nightEnd: 6,
+      dayLimitMin: 60,
+      nightLimitMin: 20,
+      pauseDurationSec: 30,
+      pauseCooldownMin: 5,
+    };
+  }
+
+  // ============================================================
+  // 初始化
+  // ============================================================
+  refreshMonitor();
+  setInterval(refreshMonitor, 5000);
+
+  window.refreshMonitor = refreshMonitor;
 })();

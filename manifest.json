@@ -1,25 +1,36 @@
 {
   "manifest_version": 3,
-  "name": "YouTube 时间监控",
-  "version": "1.0.0",
-  "description": "监控 YouTube 使用时间，超时后强制暂停",
+  "name": "别刷了！",
+  "version": "2.0.0",
+  "description": "监控多平台视频网站使用时间，超限后强制暂停休息",
   "permissions": [
     "tabs",
     "storage",
     "alarms"
+  ],
+  "host_permissions": [
+    "*://*.youtube.com/*",
+    "*://*.bilibili.com/*",
+    "*://*.tiktok.com/*",
+    "*://*.douyin.com/*"
   ],
   "background": {
     "service_worker": "background.js"
   },
   "content_scripts": [
     {
-      "matches": ["*://*.youtube.com/*"],
+      "matches": [
+        "*://*.youtube.com/*",
+        "*://*.bilibili.com/*",
+        "*://*.tiktok.com/*",
+        "*://*.douyin.com/*"
+      ],
       "js": ["content.js"],
       "run_at": "document_idle"
     }
   ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "YouTube 时间监控"
+    "default_title": "别刷了！"
   }
 }

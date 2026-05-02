@@ -2,241 +2,275 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=320">
-  <title>YouTube 时间监控</title>
+  <meta name="viewport" content="width=380">
+  <title>别刷了！</title>
   <style>
-    *, *::before, *::after {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      width: 320px;
-      min-height: 240px;
+      width: 380px;
+      min-height: 320px;
       font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
       background: #1a1a2e;
       color: #e0e0e0;
-      padding: 16px;
       font-size: 14px;
+      overflow-x: hidden;
     }
 
     .header {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 16px;
-      padding-bottom: 12px;
-      border-bottom: 1px solid rgba(255,255,255,0.08);
+      display: flex; align-items: center; gap: 10px;
+      padding: 14px 16px 10px;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
     }
+    .header-icon { font-size: 26px; line-height: 1; }
+    .header h1 { font-size: 17px; font-weight: 700; color: #fff; flex: 1; }
 
-    .header-icon {
-      font-size: 28px;
-      line-height: 1;
+    .tabs {
+      display: flex; border-bottom: 1px solid rgba(255,255,255,0.08);
     }
-
-    .header h1 {
-      font-size: 18px;
-      font-weight: 700;
-      color: #fff;
+    .tab-btn {
+      flex: 1; padding: 10px; border: none; background: transparent;
+      color: #888; font-size: 13px; font-weight: 600; cursor: pointer;
+      transition: color 0.15s, border-color 0.15s;
+      border-bottom: 2px solid transparent;
     }
+    .tab-btn:hover { color: #ccc; }
+    .tab-btn.active { color: #4ecdc4; border-bottom-color: #4ecdc4; }
 
-    .section {
-      margin-bottom: 14px;
-    }
+    .tab-content { display: none; padding: 14px 16px; }
+    .tab-content.active { display: block; }
 
+    .section { margin-bottom: 14px; }
     .section-title {
-      font-size: 11px;
-      text-transform: uppercase;
-      color: #888;
-      letter-spacing: 1px;
-      margin-bottom: 6px;
+      font-size: 11px; text-transform: uppercase; color: #666;
+      letter-spacing: 1px; margin-bottom: 8px;
     }
 
     .stat-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 6px 0;
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 5px 0;
     }
-
-    .stat-label {
-      color: #aaa;
-    }
-
-    .stat-value {
-      font-weight: 600;
-      color: #fff;
-    }
-
-    .stat-value.over-limit {
-      color: #ff4444;
-    }
-
-    .stat-value.night {
-      color: #ffaa44;
-    }
+    .stat-label { color: #999; }
+    .stat-value { font-weight: 600; color: #fff; }
+    .stat-value.over-limit { color: #ff4444; }
 
     .progress-bar {
-      width: 100%;
-      height: 6px;
-      background: rgba(255,255,255,0.1);
-      border-radius: 3px;
-      overflow: hidden;
-      margin: 8px 0 4px;
+      width: 100%; height: 6px; background: rgba(255,255,255,0.08);
+      border-radius: 3px; overflow: hidden; margin: 6px 0 3px;
     }
-
     .progress-fill {
-      height: 100%;
-      border-radius: 3px;
+      height: 100%; border-radius: 3px;
       background: linear-gradient(90deg, #4ecdc4, #44bd9e);
       transition: width 0.3s ease;
     }
-
-    .progress-fill.warning {
-      background: linear-gradient(90deg, #ffaa44, #ff8c00);
-    }
-
-    .progress-fill.danger {
-      background: linear-gradient(90deg, #ff4444, #cc0000);
-    }
-
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 8px 16px;
-      border: none;
-      border-radius: 6px;
-      font-size: 13px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: background 0.2s, opacity 0.2s;
-    }
-
-    .btn-reset {
-      background: rgba(255,255,255,0.08);
-      color: #ccc;
-    }
-
-    .btn-reset:hover {
-      background: rgba(255,68,68,0.2);
-      color: #ff6666;
-    }
-
-    .btn-reset:active {
-      opacity: 0.7;
-    }
+    .progress-fill.warning { background: linear-gradient(90deg, #ffaa44, #ff8c00); }
+    .progress-fill.danger  { background: linear-gradient(90deg, #ff4444, #cc0000); }
 
     .status-dot {
-      display: inline-block;
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      margin-right: 6px;
+      display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px;
     }
+    .status-dot.active   { background: #4ecdc4; box-shadow: 0 0 6px rgba(78,205,196,0.5); }
+    .status-dot.inactive { background: #555; }
 
-    .status-dot.active {
-      background: #4ecdc4;
-      box-shadow: 0 0 6px rgba(78,205,196,0.5);
+    .tag {
+      display: inline-block; padding: 2px 10px; border-radius: 10px;
+      font-size: 11px; font-weight: 600;
     }
+    .tag-night { background: rgba(255,170,68,0.15); color: #ffaa44; }
+    .tag-day   { background: rgba(78,205,196,0.15); color: #4ecdc4; }
 
-    .status-dot.inactive {
-      background: #555;
+    .btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 7px 14px; border: none; border-radius: 6px;
+      font-size: 12px; font-weight: 600; cursor: pointer;
+      transition: background 0.2s, opacity 0.2s;
+    }
+    .btn-reset   { background: rgba(255,255,255,0.06); color: #aaa; }
+    .btn-reset:hover { background: rgba(255,68,68,0.15); color: #ff6666; }
+    .btn-save    { background: #4ecdc4; color: #1a1a2e; }
+    .btn-save:hover { opacity: 0.85; }
+    .btn-default { background: rgba(255,255,255,0.06); color: #aaa; }
+    .btn-default:hover { background: rgba(255,255,255,0.1); color: #ccc; }
+    .btn:active  { opacity: 0.7; }
+
+    .site-toggle {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.04);
+    }
+    .site-toggle:last-child { border-bottom: none; }
+    .site-label { flex: 1; font-weight: 500; color: #ddd; }
+
+    /* Toggle switch */
+    .switch {
+      position: relative; width: 36px; height: 20px; flex-shrink: 0;
+    }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .switch .slider {
+      position: absolute; inset: 0; cursor: pointer;
+      background: #444; border-radius: 20px; transition: 0.2s;
+    }
+    .switch .slider::before {
+      content: ""; position: absolute; height: 14px; width: 14px;
+      left: 3px; bottom: 3px; background: #fff; border-radius: 50%; transition: 0.2s;
+    }
+    .switch input:checked + .slider { background: #4ecdc4; }
+    .switch input:checked + .slider::before { transform: translateX(16px); }
+
+    .config-row {
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 0; flex-wrap: wrap;
+    }
+    .config-row label { color: #999; font-size: 13px; min-width: 70px; }
+    .config-row input[type="number"] {
+      width: 60px; padding: 5px 8px; border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 4px; background: rgba(255,255,255,0.05);
+      color: #fff; font-size: 13px; text-align: center;
+    }
+    .config-row input[type="number"]:focus { outline: none; border-color: #4ecdc4; }
+    .config-row .unit { color: #666; font-size: 12px; }
+    .config-row .sep { color: #555; font-size: 14px; }
+
+    .site-times {
+      margin: 6px 0 6px 18px; padding-left: 10px;
+      border-left: 2px solid rgba(255,255,255,0.06);
+      font-size: 12px; color: #777;
     }
 
     .footer {
-      margin-top: 12px;
-      padding-top: 10px;
+      padding: 10px 16px 14px;
       border-top: 1px solid rgba(255,255,255,0.06);
-      font-size: 11px;
-      color: #666;
+      font-size: 11px; color: #555;
+      display: flex; justify-content: space-between;
     }
 
-    .log-section {
-      margin-top: 10px;
+    .toast {
+      position: fixed; bottom: 50%; left: 50%; transform: translate(-50%, 50%);
+      background: rgba(78,205,196,0.9); color: #fff; padding: 8px 20px;
+      border-radius: 8px; font-size: 13px; font-weight: 600;
+      opacity: 0; transition: opacity 0.3s; pointer-events: none;
     }
+    .toast.show { opacity: 1; }
 
-    .log-entry {
-      display: flex;
-      justify-content: space-between;
-      padding: 3px 0;
-      font-size: 12px;
-      color: #aaa;
-    }
-
-    .log-entry .log-val {
-      color: #ccc;
-    }
-
-    .tag {
-      display: inline-block;
-      padding: 2px 8px;
-      border-radius: 10px;
-      font-size: 11px;
-      font-weight: 600;
-    }
-
-    .tag-night {
-      background: rgba(255,170,68,0.15);
-      color: #ffaa44;
-    }
-
-    .tag-day {
-      background: rgba(78,205,196,0.15);
-      color: #4ecdc4;
-    }
+    /* Scrollable settings */
+    .settings-scroll { max-height: 380px; overflow-y: auto; }
+    .settings-scroll::-webkit-scrollbar { width: 4px; }
+    .settings-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
   </style>
 </head>
 <body>
-  <div class="header">
-    <div class="header-icon">🦞</div>
-    <h1>YouTube 监控</h1>
-  </div>
 
+<div class="header">
+  <div class="header-icon">🦞</div>
+  <h1>别刷了！</h1>
+</div>
+
+<div class="tabs">
+  <button class="tab-btn active" data-tab="monitor">📊 监控</button>
+  <button class="tab-btn" data-tab="settings">⚙️ 设置</button>
+</div>
+
+<!-- === 监控页 === -->
+<div class="tab-content active" id="tab-monitor">
   <div class="section">
     <div class="stat-row">
-      <span class="stat-label">今日已用</span>
+      <span class="stat-label">累计使用</span>
       <span class="stat-value" id="time-spent">加载中…</span>
     </div>
-
     <div class="progress-bar">
       <div class="progress-fill" id="progress-fill" style="width:0%"></div>
     </div>
-
     <div class="stat-row">
       <span class="stat-label">今日限制</span>
       <span class="stat-value" id="time-limit">加载中…</span>
     </div>
-
     <div class="stat-row">
       <span class="stat-label">模式</span>
       <span id="mode-tag"></span>
     </div>
-
     <div class="stat-row">
-      <span class="stat-label">当前标签页</span>
+      <span class="stat-label">当前状态</span>
       <span id="status-label">
-        <span class="status-dot inactive"></span>未在观看
+        <span class="status-dot inactive"></span>未知
       </span>
     </div>
   </div>
 
-  <div style="display:flex;gap:8px;margin-bottom:4px;">
-    <button class="btn btn-reset" id="btn-reset">
-      ↺ 重置今日数据
-    </button>
+  <div class="section">
+    <div class="section-title">各站点使用时间</div>
+    <div id="site-breakdown"></div>
   </div>
 
-  <div class="log-section">
+  <div style="display:flex;gap:8px;">
+    <button class="btn btn-reset" id="btn-reset">↺ 重置今日</button>
+  </div>
+
+  <div class="section" style="margin-top:14px;">
     <div class="section-title">📊 最近 7 天</div>
     <div id="log-container"></div>
   </div>
+</div>
 
-  <div class="footer">
-    <span id="footer-text">加载中…</span>
+<!-- === 设置页 === -->
+<div class="tab-content" id="tab-settings">
+  <div class="settings-scroll">
+    <div class="section">
+      <div class="section-title">🌐 监控站点</div>
+      <div id="site-list"></div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">🌙 夜间时段</div>
+      <div class="config-row">
+        <label>起始</label>
+        <input type="number" id="night-start" min="0" max="23" value="23">
+        <span class="unit">:00</span>
+        <span class="sep">→</span>
+        <label>结束</label>
+        <input type="number" id="night-end" min="0" max="23" value="6">
+        <span class="unit">:00</span>
+      </div>
+      <div style="font-size:11px;color:#555;margin-top:4px;">
+        在此时段内将使用「夜间限制」
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">⏱ 时间限制</div>
+      <div class="config-row">
+        <label>日间</label>
+        <input type="number" id="day-limit" min="1" max="999" value="60">
+        <span class="unit">分钟</span>
+      </div>
+      <div class="config-row">
+        <label>夜间</label>
+        <input type="number" id="night-limit" min="1" max="999" value="20">
+        <span class="unit">分钟</span>
+      </div>
+      <div class="config-row">
+        <label>暂停时长</label>
+        <input type="number" id="pause-duration" min="5" max="120" value="30">
+        <span class="unit">秒</span>
+      </div>
+      <div class="config-row">
+        <label>暂停冷却</label>
+        <input type="number" id="pause-cooldown" min="1" max="60" value="5">
+        <span class="unit">分钟</span>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="btn btn-save" id="btn-save-cfg">✓ 保存设置</button>
+      <button class="btn btn-default" id="btn-default-cfg">↺ 恢复默认</button>
+    </div>
   </div>
+</div>
 
-  <script src="popup.js"></script>
+<div class="footer">
+  <span id="footer-text">加载中…</span>
+  <span id="refresh-hint">每 5 秒自动刷新</span>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="popup.js"></script>
 </body>
 </html>
