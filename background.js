@@ -46,6 +46,7 @@ const DEFAULT_CONFIG = {
 
 const CFG_KEY = 'stop_browsing_config';
 const DATA_KEY = 'stop_browsing_data';
+const STATE_KEY = 'stop_browsing_state';
 
 // ---- 运行时状态 ----
 const S = {
@@ -190,6 +191,12 @@ async function flushSession() {
     if (typeof data._lastPause !== 'number') data._lastPause = 0;
     await saveData(data);
   }
+
+  // 保存运行时状态（仅保留 sessionMs 和 pausingStatus，其余让正常流程接管）
+  await chrome.storage.local.set({ [STATE_KEY]: {
+    sessionMs: S.sessionMs,
+    pausingStatus: S.pausingStatus,
+  } });
 }
 
 /** 检查是否超限，触发强制暂停 */
@@ -262,6 +269,15 @@ async function stopSession() {
 // ============================================================
 // 事件监听
 // ============================================================
+
+/** 浏览器完全退出时（所有窗口关闭），刷入缓存数据 */
+chrome.windows.onRemoved.addListener(async () => {
+  const windows = await chrome.windows.getAll();
+  if (windows.length === 0) {
+    console.log('[别刷了] Browser quitting, flushing session...');
+    await flushSession();
+  }
+});
 
 chrome.tabs.onActivated.addListener(async (info) => {
   await switchToTab(info.tabId);
@@ -435,6 +451,18 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
 
 (async function init() {
   try {
+    // 尝试恢复上次保存的运行时状态（service worker 可能因休眠被回收）
+    const saved = await chrome.storage.local.get(STATE_KEY);
+    if (saved[STATE_KEY]) {
+      S.sessionMs = saved[STATE_KEY].sessionMs || 0;
+      S.pausingStatus = saved[STATE_KEY].pausingStatus || null;
+      console.log('[别刷了] Restored state:', {
+        sessionMs: S.sessionMs,
+        pausingStatus: S.pausingStatus,
+      });
+    }
+
+    // 检查当前激活标签页（不做状态继承，防止误判）
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
     if (tabs.length > 0) {
       const cfg = await loadConfig();
